@@ -1,5 +1,8 @@
 use crate::extractor::{ExtractError, Extractor, Resolution, Specifier};
 use crate::tsconfig::TsConfigIndex;
+use serde_json::Value;
+use std::collections::BTreeMap;
+use std::fs;
 use std::path::{Path, PathBuf};
 use streaming_iterator::StreamingIterator;
 use tree_sitter::{Parser, Query, QueryCursor};
@@ -14,16 +17,33 @@ const IMPORT_QUERY: &str = r#"
 /// Extension probes, in order, for a specifier that has none.
 const EXTENSION_ORDER: &[&str] = &["ts", "tsx", "js", "jsx", "mts", "cts"];
 
+/// Directory index probes, in order. Narrower than `EXTENSION_ORDER` on
+/// purpose: design doc §6 specifies `<dir>/index.{ts,tsx,js,jsx}` for the
+/// index-file fallback, no `mts`/`cts`.
+const INDEX_EXTENSIONS: &[&str] = &["ts", "tsx", "js", "jsx"];
+
+/// A local package declared in the root `package.json`'s `workspaces`
+/// field (design doc §6, resolution rule 3).
+struct WorkspacePackage {
+    /// The package's own directory.
+    dir: PathBuf,
+    /// Best entry-point candidate for a bare import of the package: its
+    /// declared `exports`/`main` (normalised, may not exist on disk), or
+    /// the package directory itself so `probe`'s directory-index fallback
+    /// applies.
+    entry: PathBuf,
+}
+
 pub struct TypeScriptExtractor {
-    root: PathBuf,
     tsconfig: TsConfigIndex,
+    workspace_packages: BTreeMap<String, WorkspacePackage>,
 }
 
 impl TypeScriptExtractor {
     pub fn new(root: &Path) -> Self {
         Self {
-            root: root.to_path_buf(),
             tsconfig: TsConfigIndex::build(root),
+            workspace_packages: Self::discover_workspace_packages(root),
         }
     }
 
@@ -59,7 +79,7 @@ impl TypeScriptExtractor {
         }
 
         if candidate.is_dir() {
-            for ext in EXTENSION_ORDER {
+            for ext in INDEX_EXTENSIONS {
                 let probed = candidate.join(format!("index.{ext}"));
                 if probed.is_file() {
                     return Some(probed);
@@ -82,6 +102,155 @@ impl TypeScriptExtractor {
             // Exact mapping: `@mastore/shared-types` -> one file.
             None if pattern == raw => Some(target.to_path_buf()),
             None => None,
+        }
+    }
+
+    /// Read and parse one JSON file. Any failure (missing, unreadable,
+    /// malformed) is treated as "nothing usable here", never an error —
+    /// mirrors how a broken tsconfig degrades its subtree instead of
+    /// aborting the scan (design doc §7).
+    fn read_json(path: &Path) -> Option<Value> {
+        let text = fs::read_to_string(path).ok()?;
+        serde_json::from_str(&text).ok()
+    }
+
+    /// Build the workspace package table from the root `package.json`'s
+    /// `workspaces` field, once, at construction time. A missing or
+    /// malformed root `package.json`, or one with no usable `workspaces`
+    /// field, simply means there are no local workspace packages.
+    fn discover_workspace_packages(root: &Path) -> BTreeMap<String, WorkspacePackage> {
+        let mut packages = BTreeMap::new();
+
+        let manifest = match Self::read_json(&root.join("package.json")) {
+            Some(m) => m,
+            None => return packages,
+        };
+
+        for pattern in Self::workspace_patterns(&manifest) {
+            for dir in Self::expand_pattern(root, &pattern) {
+                let package_manifest = match Self::read_json(&dir.join("package.json")) {
+                    Some(m) => m,
+                    None => continue,
+                };
+                let name = match package_manifest.get("name").and_then(Value::as_str) {
+                    Some(n) => n.to_string(),
+                    None => continue,
+                };
+                let entry = Self::entry_point(&dir, &package_manifest);
+                packages.insert(name, WorkspacePackage { dir, entry });
+            }
+        }
+
+        packages
+    }
+
+    /// Both `workspaces` shapes: a bare array of glob patterns (npm/Yarn
+    /// classic), or an object with a `packages` array (Yarn modern).
+    /// Negation patterns (`!excluded`) are dropped rather than expanded,
+    /// since we only ever add candidates, never remove them. Anything
+    /// else, or a missing field, yields no patterns.
+    fn workspace_patterns(manifest: &Value) -> Vec<String> {
+        let field = match manifest.get("workspaces") {
+            Some(f) => f,
+            None => return Vec::new(),
+        };
+        let array = field
+            .as_array()
+            .or_else(|| field.get("packages").and_then(Value::as_array));
+        match array {
+            Some(entries) => entries
+                .iter()
+                .filter_map(Value::as_str)
+                .filter(|p| !p.starts_with('!'))
+                .map(str::to_string)
+                .collect(),
+            None => Vec::new(),
+        }
+    }
+
+    /// Expand one glob pattern (a single `*` per path segment, e.g.
+    /// `apps/*` or `packages/*`) to the directories it matches.
+    /// `node_modules` and hidden entries are never candidates.
+    fn expand_pattern(root: &Path, pattern: &str) -> Vec<PathBuf> {
+        let mut current = vec![root.to_path_buf()];
+        for segment in pattern.split('/').filter(|s| !s.is_empty()) {
+            let mut next = Vec::new();
+            for base in &current {
+                if segment.contains('*') {
+                    let entries = match fs::read_dir(base) {
+                        Ok(e) => e,
+                        Err(_) => continue,
+                    };
+                    for entry in entries.flatten() {
+                        let Some(name) = entry.file_name().to_str().map(str::to_string) else {
+                            continue;
+                        };
+                        if name == "node_modules" || name.starts_with('.') {
+                            continue;
+                        }
+                        if entry.file_type().is_ok_and(|t| t.is_dir())
+                            && Self::segment_matches(segment, &name)
+                        {
+                            next.push(entry.path());
+                        }
+                    }
+                } else {
+                    let candidate = base.join(segment);
+                    if candidate.is_dir() {
+                        next.push(candidate);
+                    }
+                }
+            }
+            current = next;
+        }
+        current
+    }
+
+    /// A single `*` wildcard within one path segment, e.g. `pkg-*`.
+    fn segment_matches(pattern: &str, name: &str) -> bool {
+        match pattern.split_once('*') {
+            Some((prefix, suffix)) => {
+                name.len() >= prefix.len() + suffix.len()
+                    && name.starts_with(prefix)
+                    && name.ends_with(suffix)
+            }
+            None => pattern == name,
+        }
+    }
+
+    /// A package's best entry-point candidate: its declared
+    /// `exports`/`main`, or the package directory itself so `probe`'s
+    /// directory-index fallback (`index.{ts,tsx,js,jsx}`) applies.
+    fn entry_point(dir: &Path, manifest: &Value) -> PathBuf {
+        let target = Self::exports_target(manifest.get("exports")).or_else(|| {
+            manifest
+                .get("main")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        });
+        match target {
+            Some(t) => crate::tsconfig::normalise_public(&dir.join(t)),
+            None => dir.to_path_buf(),
+        }
+    }
+
+    /// Only the simple `exports` shapes: a string, or an object with a
+    /// `.` key whose value is a string or has `import`/`default`.
+    /// Anything more elaborate falls through to `main` instead of
+    /// guessing wrong — v0 does not need a full exports resolver.
+    fn exports_target(exports: Option<&Value>) -> Option<String> {
+        match exports? {
+            Value::String(s) => Some(s.clone()),
+            Value::Object(map) => match map.get(".")? {
+                Value::String(s) => Some(s.clone()),
+                Value::Object(inner) => inner
+                    .get("import")
+                    .or_else(|| inner.get("default"))
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+                _ => None,
+            },
+            _ => None,
         }
     }
 }
@@ -160,8 +329,32 @@ impl Extractor for TypeScriptExtractor {
             return Resolution::Unresolved;
         }
 
-        // 3. Anything else is a third-party package.
-        let _ = &self.root;
+        // 3. Workspace package (design doc §6, rule 3). A specifier equal
+        //    to a local package name, or a deep import into one, means the
+        //    author named a package that exists in this workspace, so a
+        //    miss is Unresolved, never External — same fail-closed shape
+        //    as the alias branch above.
+        let mut matched_a_workspace_package = false;
+        for (name, package) in &self.workspace_packages {
+            let candidate = if raw == name {
+                Some(package.entry.clone())
+            } else {
+                raw.strip_prefix(name.as_str())
+                    .and_then(|rest| rest.strip_prefix('/'))
+                    .map(|rest| package.dir.join(rest))
+            };
+            if let Some(candidate) = candidate {
+                matched_a_workspace_package = true;
+                if let Some(path) = self.probe(&candidate) {
+                    return Resolution::Internal(path);
+                }
+            }
+        }
+        if matched_a_workspace_package {
+            return Resolution::Unresolved;
+        }
+
+        // 4. Anything else is a third-party package.
         Resolution::External(raw.to_string())
     }
 }
@@ -377,5 +570,176 @@ export * from "./barrel";"#,
         let e = TypeScriptExtractor::new(dir.path());
         assert_eq!(e.lang(), "typescript");
         assert_eq!(e.extensions(), &["ts", "tsx", "js", "jsx", "mts", "cts"]);
+    }
+
+    // --- Resolution rule 3: workspace packages (design doc §6) ---
+
+    #[test]
+    fn a_workspace_package_name_resolves_via_its_declared_main() {
+        let dir = TempDir::new().unwrap();
+        write(&dir, "package.json", r#"{ "workspaces": ["packages/*"] }"#);
+        write(
+            &dir,
+            "packages/shared-types/package.json",
+            r#"{ "name": "@mastore/shared-types", "main": "./src/index.ts" }"#,
+        );
+        write(&dir, "packages/shared-types/src/index.ts", "");
+        let e = TypeScriptExtractor::new(dir.path());
+        let got = e.resolve("@mastore/shared-types", &dir.path().join("apps/web/a.ts"));
+        assert_eq!(
+            got,
+            Resolution::Internal(dir.path().join("packages/shared-types/src/index.ts"))
+        );
+    }
+
+    #[test]
+    fn a_deep_import_into_a_workspace_package_resolves_to_the_file_inside_it() {
+        let dir = TempDir::new().unwrap();
+        write(&dir, "package.json", r#"{ "workspaces": ["packages/*"] }"#);
+        write(
+            &dir,
+            "packages/shared-types/package.json",
+            r#"{ "name": "@mastore/shared-types" }"#,
+        );
+        write(&dir, "packages/shared-types/utils.ts", "");
+        let e = TypeScriptExtractor::new(dir.path());
+        let got = e.resolve(
+            "@mastore/shared-types/utils",
+            &dir.path().join("apps/web/a.ts"),
+        );
+        assert_eq!(
+            got,
+            Resolution::Internal(dir.path().join("packages/shared-types/utils.ts"))
+        );
+    }
+
+    #[test]
+    fn a_workspace_package_without_a_declared_entry_falls_back_to_its_index_file() {
+        let dir = TempDir::new().unwrap();
+        write(&dir, "package.json", r#"{ "workspaces": ["packages/*"] }"#);
+        write(
+            &dir,
+            "packages/shared-types/package.json",
+            r#"{ "name": "@mastore/shared-types" }"#,
+        );
+        write(&dir, "packages/shared-types/index.ts", "");
+        let e = TypeScriptExtractor::new(dir.path());
+        let got = e.resolve("@mastore/shared-types", &dir.path().join("apps/web/a.ts"));
+        assert_eq!(
+            got,
+            Resolution::Internal(dir.path().join("packages/shared-types/index.ts"))
+        );
+    }
+
+    #[test]
+    fn a_workspace_package_whose_entry_is_missing_is_unresolved_not_external() {
+        // The package is declared and named, but its `main` was never
+        // built — mirrors an unbuilt local package on a real monorepo.
+        let dir = TempDir::new().unwrap();
+        write(&dir, "package.json", r#"{ "workspaces": ["packages/*"] }"#);
+        write(
+            &dir,
+            "packages/shared-types/package.json",
+            r#"{ "name": "@mastore/shared-types", "main": "./dist/index.js" }"#,
+        );
+        let e = TypeScriptExtractor::new(dir.path());
+        assert_eq!(
+            e.resolve("@mastore/shared-types", &dir.path().join("apps/web/a.ts")),
+            Resolution::Unresolved
+        );
+    }
+
+    #[test]
+    fn a_bare_specifier_that_is_not_a_workspace_package_is_still_external() {
+        let dir = TempDir::new().unwrap();
+        write(&dir, "package.json", r#"{ "workspaces": ["packages/*"] }"#);
+        write(
+            &dir,
+            "packages/shared-types/package.json",
+            r#"{ "name": "@mastore/shared-types" }"#,
+        );
+        let e = TypeScriptExtractor::new(dir.path());
+        assert_eq!(
+            e.resolve("react", &dir.path().join("apps/web/a.ts")),
+            Resolution::External("react".into())
+        );
+    }
+
+    #[test]
+    fn a_tsconfig_alias_wins_over_a_workspace_package_when_both_cover_the_specifier() {
+        // On the acceptance target, cross-package imports like
+        // `@mastore/shared-types` are covered by *both* a tsconfig alias
+        // and a workspace package; rule 2 (alias) must keep winning over
+        // rule 3 (workspace package) — this is the ordering guarantee the
+        // acceptance target depends on.
+        let dir = TempDir::new().unwrap();
+        write(
+            &dir,
+            "tsconfig.json",
+            r#"{ "compilerOptions": { "paths": {
+                "@mastore/shared-types": ["./packages/shared-types/src/index.ts"]
+            } } }"#,
+        );
+        write(&dir, "packages/shared-types/src/index.ts", "");
+        write(&dir, "package.json", r#"{ "workspaces": ["packages/*"] }"#);
+        write(
+            &dir,
+            "packages/shared-types/package.json",
+            r#"{ "name": "@mastore/shared-types", "main": "./dist/index.js" }"#,
+        );
+        write(&dir, "packages/shared-types/dist/index.js", "");
+        let e = TypeScriptExtractor::new(dir.path());
+        let got = e.resolve("@mastore/shared-types", &dir.path().join("apps/web/a.ts"));
+        // The tsconfig alias target, not the workspace package's `main`.
+        assert_eq!(
+            got,
+            Resolution::Internal(dir.path().join("packages/shared-types/src/index.ts"))
+        );
+    }
+
+    #[test]
+    fn workspaces_declared_as_an_object_with_a_packages_array_is_supported() {
+        // The Yarn-modern shape: `{ "workspaces": { "packages": [...] } }`.
+        let dir = TempDir::new().unwrap();
+        write(
+            &dir,
+            "package.json",
+            r#"{ "workspaces": { "packages": ["packages/*"], "nohoist": [] } }"#,
+        );
+        write(
+            &dir,
+            "packages/shared-types/package.json",
+            r#"{ "name": "@mastore/shared-types" }"#,
+        );
+        write(&dir, "packages/shared-types/index.ts", "");
+        let e = TypeScriptExtractor::new(dir.path());
+        let got = e.resolve("@mastore/shared-types", &dir.path().join("apps/web/a.ts"));
+        assert_eq!(
+            got,
+            Resolution::Internal(dir.path().join("packages/shared-types/index.ts"))
+        );
+    }
+
+    #[test]
+    fn a_missing_root_package_json_does_not_break_resolution() {
+        let dir = TempDir::new().unwrap();
+        write(&dir, "src/a.ts", "");
+        let e = TypeScriptExtractor::new(dir.path());
+        assert_eq!(
+            e.resolve("react", &dir.path().join("src/a.ts")),
+            Resolution::External("react".into())
+        );
+    }
+
+    #[test]
+    fn a_malformed_root_package_json_does_not_break_resolution() {
+        let dir = TempDir::new().unwrap();
+        write(&dir, "package.json", "{ this is not json at all ");
+        write(&dir, "src/a.ts", "");
+        let e = TypeScriptExtractor::new(dir.path());
+        assert_eq!(
+            e.resolve("react", &dir.path().join("src/a.ts")),
+            Resolution::External("react".into())
+        );
     }
 }

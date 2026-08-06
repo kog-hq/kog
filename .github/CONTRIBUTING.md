@@ -1,8 +1,8 @@
 # Contributing to mycelium
 
-Thanks for looking. This project is **pre-release**: the design is complete but
-implementation hasn't started, so the most valuable contribution right now is
-argument, not code.
+Thanks for looking. This project is **pre-release**: the v0 gate (design doc §9) has
+just been met, so the most valuable contribution right now is still argument as much
+as code — the shape of v0.1 and beyond is open.
 
 ## The most useful thing you can do today
 
@@ -14,13 +14,14 @@ for you, open an issue and say so — we'll translate it.
 
 ## Code contributions
 
-Once implementation begins:
-
 - `cargo fmt --all` and `cargo clippy --all-targets -- -D warnings` must pass.
 - Changes to the TypeScript parser need tests covering new syntax and edge cases.
-- Changes to import resolution need golden tests showing the effect on a real codebase:
-  false positives and false negatives measured.
-- Changes to the graph model should document the schema change and query impact.
+- Changes to import resolution need unit tests showing the effect: synthetic
+  fixtures, one per resolution rule, on the model already used throughout
+  `crates/mycelium-graph` (design doc §8) — there is no infrastructure in this
+  repository for golden tests against a real external codebase.
+- Changes to the graph model should document the schema change in
+  `docs/design/v0-design.md` §5.
 
 ## Commit messages
 
@@ -61,7 +62,7 @@ explained in the body.
 
 ## Scope
 
-The design doc has an explicit non-goals section (§3). It's short, and it's there
+The design doc has an explicit non-goals section (§10). It's short, and it's there
 so the tool stays one sharp thing instead of a broad TypeScript tooling suite. A PR
 adding features beyond file/import graph extraction will be declined for v0 — but the
-discussion about what v1 should cover is open, and welcome in an issue.
+discussion about what v0.1 and beyond should cover is open, and welcome in an issue.

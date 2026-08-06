@@ -38,8 +38,10 @@ pub struct Failure {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DiagnosticKind {
-    /// The specifier looks internal, but no file was found for it anywhere
-    /// on disk — a genuinely broken import. Depresses the resolution rate.
+    /// The specifier looks internal, but either no file was found for it
+    /// anywhere on disk, or a file was found and the tool itself failed to
+    /// read or parse it (our failure, not the target's) — a genuinely
+    /// broken import either way. Depresses the resolution rate.
     Unresolved,
     /// The specifier resolved to a real file, but that file falls outside
     /// the scanned node set (gitignored, inside an always-skipped

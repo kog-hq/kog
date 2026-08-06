@@ -76,8 +76,13 @@ pub fn build_graph(root: &Path, extractor: &dyn Extractor) -> Graph {
     // what survives this pass — computing it from *all* discovered files
     // (before failures are known) would let a specifier into a file that
     // failed be counted `resolved` and produce an edge to a node that is
-    // never actually emitted.
+    // never actually emitted. `failed` records the id of every file that did
+    // *not* survive, so pass 2 can tell them apart from a real file that is
+    // merely out of scope: an import into a file the tool itself could not
+    // read or parse is our failure, not a deliberately excluded target, and
+    // must depress the resolution rate like any other broken import.
     let mut parsed: Vec<ParsedFile> = Vec::new();
+    let mut failed: HashSet<String> = HashSet::new();
     for file in &files {
         let id = match node_id(root, file) {
             Some(id) => id,
@@ -91,6 +96,7 @@ pub fn build_graph(root: &Path, extractor: &dyn Extractor) -> Graph {
                     path: id.clone(),
                     reason: format!("read failed: {e}"),
                 });
+                failed.insert(id);
                 continue;
             }
         };
@@ -102,6 +108,7 @@ pub fn build_graph(root: &Path, extractor: &dyn Extractor) -> Graph {
                     path: id.clone(),
                     reason: format!("extract failed: {e}"),
                 });
+                failed.insert(id);
                 continue;
             }
         };
@@ -136,8 +143,8 @@ pub fn build_graph(root: &Path, extractor: &dyn Extractor) -> Graph {
                 }
                 Resolution::Internal(target) => {
                     stats.specifiers_internal += 1;
-                    match node_id(root, &target).filter(|t| known.contains(t.as_str())) {
-                        Some(target_id) => {
+                    match node_id(root, &target) {
+                        Some(target_id) if known.contains(target_id.as_str()) => {
                             stats.resolved += 1;
                             if target_id != file.id {
                                 edges.insert(Edge {
@@ -147,13 +154,28 @@ pub fn build_graph(root: &Path, extractor: &dyn Extractor) -> Graph {
                                 });
                             }
                         }
+                        // The target genuinely exists on disk, but the tool
+                        // itself failed to read or parse it. That is our
+                        // failure, not an out-of-scope target, so it must
+                        // depress the resolution rate exactly like any other
+                        // broken import — never counted `excluded`.
+                        Some(target_id) if failed.contains(target_id.as_str()) => {
+                            stats.unresolved += 1;
+                            record_diagnostic(
+                                &mut stats,
+                                &file.id,
+                                specifier,
+                                DiagnosticKind::Unresolved,
+                            );
+                        }
                         // Resolved to a real file, but it is not part of the
-                        // scanned node set (gitignored, always-skipped, a
-                        // failed read/parse, or an extension this extractor
-                        // does not claim) — a deliberate exclusion, not a
-                        // broken import. Must not depress the resolution
-                        // rate the way a genuinely unresolved specifier does.
-                        None => {
+                        // scanned node set (gitignored, inside an
+                        // always-skipped directory, or an extension this
+                        // extractor does not claim) — a deliberate
+                        // exclusion, not a broken import. Must not depress
+                        // the resolution rate the way a genuinely unresolved
+                        // specifier does.
+                        _ => {
                             stats.excluded += 1;
                             record_diagnostic(
                                 &mut stats,
@@ -576,10 +598,50 @@ import ghost from "./ghost";"#,
             .failures
             .iter()
             .any(|f| f.path == "src/b.ts" && f.reason.starts_with("extract failed")));
-        // ...and the import into it lands as `excluded` (a real file exists,
-        // it simply never became a scanned node), never silently `resolved`.
+        // ...and the import into it lands as `unresolved`: the target file
+        // genuinely exists, but *our own tool* failed to read or parse it —
+        // that is our failure, not an out-of-scope target, so it must
+        // depress the resolution rate exactly like any other broken import.
+        // It must never be silently `resolved`, and must never be
+        // `excluded` either (that would let a broken extractor hide behind
+        // a perfect published rate).
         assert_eq!(graph.stats.resolved, 0);
-        assert_eq!(graph.stats.excluded, 1);
+        assert_eq!(graph.stats.unresolved, 1);
+        assert_eq!(graph.stats.excluded, 0);
+    }
+
+    #[test]
+    fn several_files_failing_to_parse_measurably_drop_the_resolution_rate() {
+        // Guards against the failure mode this whole fix exists for: an
+        // extractor broken on a chunk of the codebase must not leave the
+        // published rate at a deceptive 1.0000. Three files fail to parse,
+        // each imported once, and none of those imports may land anywhere
+        // but `unresolved`.
+        let dir = TempDir::new().unwrap();
+        write(
+            &dir,
+            "src/a.ts",
+            r#"import b1 from "./b1";
+import b2 from "./b2";
+import b3 from "./b3";"#,
+        );
+        write(&dir, "src/b1.ts", "// FORCE_PARSE_FAILURE");
+        write(&dir, "src/b2.ts", "// FORCE_PARSE_FAILURE");
+        write(&dir, "src/b3.ts", "// FORCE_PARSE_FAILURE");
+
+        let extractor = FailOnMarkerExtractor(TypeScriptExtractor::new(dir.path()));
+        let graph = crate::build_graph(dir.path(), &extractor);
+
+        assert_eq!(graph.stats.failures.len(), 3);
+        assert_eq!(graph.stats.resolved, 0);
+        assert_eq!(graph.stats.unresolved, 3);
+        assert_eq!(graph.stats.excluded, 0);
+        assert!(
+            graph.stats.resolution_rate < 1.0,
+            "a parser broken on multiple files must measurably depress the \
+             published rate, got {}",
+            graph.stats.resolution_rate
+        );
     }
 
     // --- Fix round 1: Finding 4 — sort guarantees, actually exercised ---

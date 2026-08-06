@@ -32,9 +32,13 @@ commercial SLA — but security issues will be treated as high priority.
 - **You must review your own code before scanning**. mycelium reads whatever files
   you point it to. If you scan a directory containing secrets, those secrets can
   appear in the output. This is your responsibility.
-- **The parser is strict, not a linter**. Malformed TypeScript that the parser
-  rejects is not a vulnerability — it's correct behavior.
-- Vulnerabilities in tree-sitter, Node.js, or other upstream tools. Please
+- **Malformed TypeScript, by itself**. The parser is built on tree-sitter,
+  which is fault-tolerant by design: it never rejects input, it recovers from
+  syntax errors and extracts whatever it still can. A crafted file that
+  merely confuses the parser into missing or misattributing an import is a
+  correctness bug (see "Incorrect graph construction" above) — only a file
+  that crashes the process or exhausts resources is a security issue.
+- Vulnerabilities in tree-sitter or other upstream Rust crates. Please
   report those to their maintainers.
 
 ## Design-level mitigations

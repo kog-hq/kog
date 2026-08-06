@@ -1,4 +1,10 @@
+<img src="assets/logo.svg" alt="" width="72" align="left" hspace="12" vspace="4">
+
 # KOG
+
+**K**nowledge **O**rchestration **G**raph
+
+<br clear="left">
 
 Turns a codebase into a file/import graph. One binary, zero dependencies — no
 JS toolchain, no repo checkout, no server to stand up by hand.
@@ -61,9 +67,7 @@ This project is pre-release; see
 [`.github/CONTRIBUTING.md`](.github/CONTRIBUTING.md) for the current state
 and how to contribute. The design rationale — what's in v0, what's
 deliberately out, and the measurements behind each call — lives in
-[`docs/design/v0-design.md`](docs/design/v0-design.md) (written in French,
-as a working document; identifiers, schemas and product strings are in
-English throughout the codebase).
+[`docs/design/v0-design.md`](docs/design/v0-design.md).
 
 ```
 just build    # build the page, then the release binary

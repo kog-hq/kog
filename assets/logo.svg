@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="KOG">
+  <title>KOG</title>
+  <!-- Spokes first: the satellite discs are painted over their ends, so no join is visible. -->
+  <g stroke="currentColor" stroke-width="2.75" stroke-linecap="round" opacity="0.55">
+    <path d="M32 32 53 32" />
+    <path d="M32 32 46.85 46.85" />
+    <path d="M32 32 32 53" />
+    <path d="M32 32 17.15 46.85" />
+    <path d="M32 32 11 32" />
+    <path d="M32 32 17.15 17.15" />
+    <path d="M32 32 32 11" />
+    <path d="M32 32 46.85 17.15" />
+  </g>
+  <!-- Satellites: a ring at 16 px, dependents at full size. -->
+  <g fill="currentColor">
+    <circle cx="53" cy="32" r="4.6" />
+    <circle cx="46.85" cy="46.85" r="4.6" />
+    <circle cx="32" cy="53" r="4.6" />
+    <circle cx="17.15" cy="46.85" r="4.6" />
+    <circle cx="11" cy="32" r="4.6" />
+    <circle cx="17.15" cy="17.15" r="4.6" />
+    <circle cx="32" cy="11" r="4.6" />
+    <circle cx="46.85" cy="17.15" r="4.6" />
+  </g>
+  <!-- The hub. Oversized on purpose: the shape a dependency graph actually makes. -->
+  <circle cx="32" cy="32" r="9.5" fill="currentColor" />
+</svg>

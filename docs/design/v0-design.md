@@ -1,164 +1,164 @@
 # KOG — design v0
 
-- **Date** : 2026-08-06
-- **Statut** : en relecture
-- **Périmètre v0** : parseur Rust d'un projet TypeScript vers un graphe fichiers/imports,
-  CLI, rendu WebGL. Ni Tauri, ni clustering, ni IA.
+- **Date**: 2026-08-06
+- **Status**: in review
+- **v0 scope**: Rust parser from a TypeScript project to a file/import graph,
+  CLI, WebGL rendering. No Tauri, no clustering, no AI.
 
-> Le document est en français ; les identifiants, schémas et messages du produit sont
-> en anglais, le projet étant destiné à une publication open source internationale.
+> Documentation is in English; the design, plan and measurement documents were
+> originally written in French and translated when the project went public.
 
 ---
 
-## 1. Problème
+## 1. Problem
 
-Un développeur qui accumule des codebases n'a aucune vue d'ensemble de son propre code.
-Les outils existants se répartissent en deux camps qui ne se parlent pas :
+A developer who accumulates codebases has no overview of their own code.
+Existing tools split into two camps that don't talk to each other:
 
-| Camp | Exemples | Ce qu'ils font | Ce qui manque |
+| Camp | Examples | What they do | What's missing |
 | --- | --- | --- | --- |
-| Cartographes | Graphify-Labs/graphify | Comprennent le code, produisent un graphe | Aucun pilotage, mono-projet, export HTML statique |
-| Pilotes | Open Cowork, CloudCLI, agents-ui, OpenHands | Lancent des agents IA | Aucune compréhension du code |
+| Cartographers | Graphify-Labs/graphify | Understand the code, produce a graph | No steering, single-project, static HTML export |
+| Pilots | Open Cowork, CloudCLI, agents-ui, OpenHands | Launch AI agents | No understanding of the code |
 
-KOG vise l'intersection : **voir son code et piloter ses agents dessus, dans la même
-carte**. La v0 ne traite que la première moitié — et même pas en entier.
+KOG targets the intersection: **seeing your code and steering your agents over it, on
+the same map**. v0 only handles the first half — and not even all of it.
 
-### Référence marché
+### Market reference
 
-`Graphify-Labs/graphify`, mesuré le 2026-08-06 via l'API GitHub :
+`Graphify-Labs/graphify`, measured on 2026-08-06 via the GitHub API:
 
-- 103 112 étoiles, 10 020 forks, 819 issues ouvertes
-- créé le 2026-04-03 → **4 mois**
-- Python, Apache-2.0 (relicencié depuis MIT), Y Combinator S26
+- 103,112 stars, 10,020 forks, 819 open issues
+- created 2026-04-03 → **4 months**
+- Python, Apache-2.0 (relicensed from MIT), Y Combinator S26
 
-C'est la preuve que le marché existe, et le concurrent à battre.
+This is proof the market exists, and the competitor to beat.
 
 ---
 
-## 2. Ce que Graphify mesure — et ne mesure pas
+## 2. What Graphify measures — and doesn't measure
 
-Relevé dans `BENCHMARKS.md` (màj 2026-07-05) et `docs/how-it-works.md` :
+Recorded in `BENCHMARKS.md` (updated 2026-07-05) and `docs/how-it-works.md`:
 
-| Benchmark | Métrique | graphify | Concurrents |
+| Benchmark | Metric | graphify | Competitors |
 | --- | --- | --- | --- |
-| LOCOMO (n=300) | recall@10 | 0,497 | mem0 0,048 · supermemory 0,149 |
-| LOCOMO (n=300) | QA accuracy | 45,3 % | supermemory 49,7 % · mem0 27,3 % |
-| LongMemEval-S (n=50) | QA accuracy | 76 % | à égalité avec dense RAG |
-| ERPNext (~1M LOC) | key-fact coverage | **82,0 %** vs 70,8 % (baseline grep+read) | — |
+| LOCOMO (n=300) | recall@10 | 0.497 | mem0 0.048 · supermemory 0.149 |
+| LOCOMO (n=300) | QA accuracy | 45.3 % | supermemory 49.7 % · mem0 27.3 % |
+| LongMemEval-S (n=50) | QA accuracy | 76 % | tied with dense RAG |
+| ERPNext (~1M LOC) | key-fact coverage | **82.0 %** vs 70.8 % (baseline grep+read) | — |
 
-Le chiffre « code » (82,0 %) mesure un **effet en aval** — est-ce qu'un agent répond
-mieux — sur **n = 6 questions**, à ~140K tokens par requête. Il ne dit rien de la
-justesse du graphe lui-même.
+The "code" figure (82.0 %) measures a **downstream effect** — whether an agent answers
+better — on **n = 6 questions**, at ~140K tokens per query. It says nothing about the
+correctness of the graph itself.
 
-Leur pipeline de code est pourtant de la même famille que le nôtre :
+Yet their code pipeline is the same family as ours:
 
-> « Tree-sitter parses your code files […] This runs locally with no LLM involved.
-> 25 languages supported. »
-> « Code files are **not** sent to the LLM semantic extractor in the normal pipeline. »
+> "Tree-sitter parses your code files […] This runs locally with no LLM involved.
+> 25 languages supported."
+> "Code files are **not** sent to the LLM semantic extractor in the normal pipeline."
 
-Chaque relation est taguée `EXTRACTED` (confiance 1.0), `INFERRED` (Claude, 0,55–0,95)
-ou `AMBIGUOUS`. Pour le code, tout est `EXTRACTED` : déterministe, comme chez nous.
+Each relation is tagged `EXTRACTED` (confidence 1.0), `INFERRED` (Claude, 0.55–0.95)
+or `AMBIGUOUS`. For code, everything is `EXTRACTED`: deterministic, like ours.
 
-**Ce qu'ils ne publient jamais : quelle fraction des imports a été résolue**, ni au
-total ni par langage. Un import raté ne remonte nulle part — il n'existe pas comme
-échec, il disparaît du graphe.
+**What they never publish: what fraction of imports was resolved**, neither overall
+nor per language. A failed import surfaces nowhere — it doesn't exist as a failure,
+it disappears from the graph.
 
-C'est l'ouverture de KOG. Le taux de résolution coûte zéro à produire, se vérifie
-repo par repo, et devient un argument public.
+That's KOG's opening. The resolution rate costs nothing to produce, is verifiable
+repo by repo, and becomes a public argument.
 
 ---
 
-## 3. Décisions, et les mesures qui les ont dictées
+## 3. Decisions, and the measurements that dictated them
 
-### 3.1 Nœud = fichier, arête = import
+### 3.1 Node = file, edge = import
 
-Écarté : nœud = symbole, arête = appel. La résolution d'appels en TypeScript (alias,
-réexports, dispatch dynamique, méthodes) tombe sous les 70 % d'exactitude sans
-type-checker complet, et **un graphe faux est pire qu'un graphe grossier**.
+Ruled out: node = symbol, edge = call. Call resolution in TypeScript (aliases,
+re-exports, dynamic dispatch, methods) falls below 70 % accuracy without a full
+type-checker, and **a wrong graph is worse than a coarse graph**.
 
-Sur le plus gros projet de la machine de référence, le modèle fichier donne ~727 nœuds
-et ~2 100 arêtes : lisible, vérifiable, suffisant pour prouver la chaîne Rust → WebGL.
+On the largest project on the reference machine, the file model gives ~727 nodes
+and ~2,100 edges: readable, verifiable, enough to prove the Rust → WebGL chain.
 
-### 3.2 TypeScript seul en v0
+### 3.2 TypeScript only in v0
 
-Recensement de la machine de référence, 2 209 fichiers de code :
+Census of the reference machine, 2,209 code files:
 
-| Extension | Fichiers | Part |
+| Extension | Files | Share |
 | --- | ---: | ---: |
-| `.tsx` `.ts` `.js` `.jsx` | 2 097 | **94,9 %** |
-| `.go` | 62 | 2,8 % |
-| `.swift` | 34 | 1,5 % |
-| `.rs` | 10 | 0,5 % |
-| `.sh` | 6 | 0,3 % |
+| `.tsx` `.ts` `.js` `.jsx` | 2,097 | **94.9 %** |
+| `.go` | 62 | 2.8 % |
+| `.swift` | 34 | 1.5 % |
+| `.rs` | 10 | 0.5 % |
+| `.sh` | 6 | 0.3 % |
 
-Mais la part n'est pas l'argument principal. Le modèle fichier+imports **ne s'applique
-pas également à tous les langages** :
+But share isn't the main argument. The file+imports model **doesn't apply equally
+to every language**:
 
-- **Swift — le modèle ne produit rien.** Les 34 fichiers du projet de référence importent
-  exclusivement des frameworks système : `SwiftUI` ×23, `Foundation` ×12, `Combine` ×9,
+- **Swift — the model produces nothing.** The 34 files in the reference project import
+  exclusively system frameworks: `SwiftUI` ×23, `Foundation` ×12, `Combine` ×9,
   `WidgetKit` ×5, `StoreKit` ×3, `AVFoundation` ×2, `UserNotifications`, `Supabase`.
-  **Zéro import interne.** C'est structurel : en Swift, les fichiers d'un même module se
-  voient sans s'importer. Le graphe serait 34 nœuds et 0 arête. Swift attend le niveau
-  symbole.
-- **Go — applicable, mais le nœud change de nature.** 73 imports internes sur 298 au
-  total, pointant vers des **packages** (répertoires), pas des fichiers :
-  `ClientServer/internal/model` désigne 15 fichiers. Second modèle de nœud, second
-  résolveur, pour ~18 nœuds.
-- **Rust — 10 fichiers**, sans intérêt de démonstration.
+  **Zero internal imports.** This is structural: in Swift, files within the same
+  module see each other without importing. The graph would be 34 nodes and 0 edges.
+  Swift is waiting on the symbol level.
+- **Go — applicable, but the node changes nature.** 73 internal imports out of 298
+  total, pointing to **packages** (directories), not files:
+  `ClientServer/internal/model` designates 15 files. A second node model, a second
+  resolver, for ~18 nodes.
+- **Rust — 10 files**, no demonstration value.
 
-### 3.3 Règle d'entrée d'un langage
+### 3.3 A language's entry rule
 
-> **Un langage entre dans KOG quand il passe sa propre gate de résolution — pas
-> quand sa grammaire compile.**
+> **A language enters KOG when it passes its own resolution gate — not
+> when its grammar compiles.**
 
-Chaque langage supporté affiche son taux. Un langage dont le modèle ne produit pas
-d'arêtes (Swift aujourd'hui) est documenté comme tel plutôt que listé à vide.
+Every supported language publishes its own rate. A language whose model produces no
+edges (Swift today) is documented as such rather than listed empty.
 
-C'est la réponse directe aux 25 langages non mesurés de Graphify : moins de langages,
-chacun avec un chiffre.
+This is the direct answer to Graphify's 25 unmeasured languages: fewer languages,
+each with a number.
 
-### 3.4 Résolution des alias : obligatoire
+### 3.4 Alias resolution: mandatory
 
-Répartition des 4 355 specifiers `from '…'` du projet de référence :
+Breakdown of the 4,355 `from '…'` specifiers in the reference project:
 
-| Catégorie | Compte |
+| Category | Count |
 | --- | ---: |
-| Alias internes (`@/` `@common/` `@modules/` `@mastore/` `@lib/`) | 2 651 |
-| Relatifs (`./` `../`) | 558 |
-| **Total interne** | **3 209** (73,7 %) |
-| Externes (`@nestjs` 282, `react` 261, `lucide-react` 196, `next` 98, `@tanstack` 41…) | 1 146 |
+| Internal aliases (`@/` `@common/` `@modules/` `@mastore/` `@lib/`) | 2,651 |
+| Relative (`./` `../`) | 558 |
+| **Total internal** | **3,209** (73.7 %) |
+| External (`@nestjs` 282, `react` 261, `lucide-react` 196, `next` 98, `@tanstack` 41…) | 1,146 |
 
-Ces 1 146 specifiers externes se répartissent sur **77 paquets distincts**.
+These 1,146 external specifiers spread across **77 distinct packages**.
 
-Un résolveur qui ignore les `paths` de tsconfig perd **82,6 % des arêtes internes**. La
-lecture des tsconfig n'est donc pas une option annexe, c'est le cœur du parseur.
+A resolver that ignores tsconfig `paths` loses **82.6 % of internal edges**. Reading
+tsconfig is therefore not a side option, it's the core of the parser.
 
-Le projet de référence est de surcroît un monorepo Turborepo : `workspaces: ["apps/*",
-"packages/*"]`, un `tsconfig.base.json` racine et cinq tsconfig imbriqués, avec des
-imports `@mastore/*` entre packages. C'est le cas le plus dur, donc le bon banc d'essai.
+The reference project is moreover a Turborepo monorepo: `workspaces: ["apps/*",
+"packages/*"]`, a root `tsconfig.base.json` and five nested tsconfigs, with
+`@mastore/*` imports between packages. It's the hardest case, so it's the right test bench.
 
-### 3.5 Dépendances externes : ignorées, mais comptées
+### 3.5 External dependencies: ignored, but counted
 
-Les nœuds sont exclusivement les fichiers du projet — la topologie reste celle du code.
-Chaque nœud porte `external_deps: ["react", "next"]`, ce qui permettra plus tard de
-filtrer (« quels fichiers dépendent de Prisma ? ») sans repasser le parseur ni polluer
-le layout avec des hubs à 257 arêtes.
+Nodes are exclusively the project's files — the topology stays that of the code.
+Every node carries `external_deps: ["react", "next"]`, which will later allow
+filtering ("which files depend on Prisma?") without re-running the parser or
+polluting the layout with 257-edge hubs.
 
-### 3.6 Renderer : sigma.js
+### 3.6 Renderer: sigma.js
 
-| Bibliothèque | Version | Licence |
+| Library | Version | License |
 | --- | --- | --- |
 | `sigma` + `graphology` | 3.0.3 / 0.26.0 | **MIT** |
 | `@cosmograph/cosmos` | 3.4.1 | **CC-BY-NC-4.0** |
 
-Cosmograph est en licence non-commerciale, non-OSI, incompatible avec un MIT+Apache.
-L'écarter est une contrainte de licence, pas une préférence technique.
+Cosmograph is under a non-commercial, non-OSI license, incompatible with MIT+Apache.
+Ruling it out is a licensing constraint, not a technical preference.
 
-### 3.7 Forme du prototype : CLI avant Tauri
+### 3.7 Prototype shape: CLI before Tauri
 
-Le crate et le CLI produisent `graph.json` ; une page Vite+sigma le charge. Tauri
-n'apparaît qu'après la gate, pour envelopper un crate déjà testé. Si le graphe ne sert à
-rien, on l'apprend en heures plutôt qu'en jours.
+The crate and the CLI produce `graph.json`; a Vite+sigma page loads it. Tauri only
+shows up after the gate, to wrap a crate that's already been tested. If the graph
+turns out to be useless, that's learned in hours rather than days.
 
 ---
 
@@ -168,41 +168,41 @@ rien, on l'apprend en heures plutôt qu'en jours.
 kog/
 ├── Cargo.toml                 workspace
 ├── crates/
-│   ├── kog-graph/        lib — extraction, résolution, assemblage
+│   ├── kog-graph/        lib — extraction, resolution, assembly
 │   └── kog-cli/          bin — kog scan <dir> -o graph.json
 ├── app/                       Vite + React + TS + sigma
 └── docs/design/, docs/plans/
 ```
 
-`kog-graph`, un module par rôle :
+`kog-graph`, one module per role:
 
-| Module | Responsabilité | Dépend de |
+| Module | Responsibility | Depends on |
 | --- | --- | --- |
-| `model.rs` | `Graph` / `Node` / `Edge` / `Stats`, serde. Agnostique du langage, zéro logique | — |
-| `extractor.rs` | Trait `Extractor` : `extensions()`, `extract(source) -> Vec<Specifier>`, `resolve(...)` | tsconfig |
-| `discover.rs` | Parcours, respect de `.gitignore`, filtrage par extensions déclarées | — |
-| `tsconfig.rs` | Lecture et fusion des tsconfig (`extends`, `paths`, `baseUrl`) — le cœur du parseur, 719 lignes | discover |
-| `extractors/typescript.rs` | Grammaire tree-sitter TS/TSX, règles de résolution TS | extractor, tsconfig |
-| `graph.rs` | Assemblage, déduplication, statistiques | tous |
+| `model.rs` | `Graph` / `Node` / `Edge` / `Stats`, serde. Language-agnostic, zero logic | — |
+| `extractor.rs` | `Extractor` trait: `extensions()`, `extract(source) -> Vec<Specifier>`, `resolve(...)` | tsconfig |
+| `discover.rs` | Traversal, respects `.gitignore`, filtering by declared extensions | — |
+| `tsconfig.rs` | Reading and merging tsconfig (`extends`, `paths`, `baseUrl`) — the core of the parser, 719 lines | discover |
+| `extractors/typescript.rs` | tree-sitter TS/TSX grammar, TS resolution rules | extractor, tsconfig |
+| `graph.rs` | Assembly, deduplication, statistics | all |
 
-Le trait `Extractor` existe dès le premier jour. Ajouter Go doit être **un fichier**,
-pas un refactor — et c'est précisément ce que la v0.2 vérifiera.
+The `Extractor` trait exists from day one. Adding Go must be **one file**,
+not a refactor — and that's precisely what v0.2 will verify.
 
-### Dépendances Rust
+### Rust dependencies
 
-`tree-sitter` 0.26.11 et `tree-sitter-typescript` 0.23.2. Ce dernier ne dépend que de
-`tree-sitter-language ^0.1`, le shim d'ABI stable : les deux versions s'accordent sans
+`tree-sitter` 0.26.11 and `tree-sitter-typescript` 0.23.2. The latter depends only on
+`tree-sitter-language ^0.1`, the stable-ABI shim: the two versions line up without
 intervention.
 
 ---
 
-## 5. Modèle de données
+## 5. Data model
 
 ```jsonc
 {
   "nodes": [
     {
-      "id": "apps/frontend/src/lib/api.ts",   // chemin relatif à la racine scannée
+      "id": "apps/frontend/src/lib/api.ts",   // path relative to the scanned root
       "path": "apps/frontend/src/lib/api.ts",
       "lang": "typescript",
       "loc": 143,
@@ -236,190 +236,190 @@ intervention.
 }
 ```
 
-Chiffres tels que mesurés sur la cible d'acceptation, voir
+Figures as measured on the acceptance target, see
 `docs/measurements/2026-08-06-v0-gate.md`.
 
-`resolution_rate` = `resolved / (specifiers_internal - excluded)`. Les externes sont
-hors du calcul : un `import react` n'a pas à pointer vers un fichier. `excluded` est
-retiré du dénominateur pour la même raison : un specifier qui résout vers un vrai
-fichier délibérément hors périmètre (gitignoré, dossier toujours exclu, ou extension
-que l'extracteur ne revendique pas) n'est pas un échec du résolveur — le compter contre
-le taux sous-évaluerait la qualité du résolveur au lieu de la mesurer. À l'inverse, un
-fichier que l'outil lui-même n'a pas réussi à lire ou parser n'est jamais `excluded` :
-c'est notre échec, pas une cible hors périmètre, donc il reste `unresolved` et continue
-de peser sur le taux.
+`resolution_rate` = `resolved / (specifiers_internal - excluded)`. Externals are
+outside the calculation: an `import react` doesn't have to point to a file. `excluded`
+is removed from the denominator for the same reason: a specifier that resolves to a
+real file deliberately out of scope (gitignored, a directory always excluded, or an
+extension the extractor doesn't claim) is not a failure of the resolver — counting it
+against the rate would understate the resolver's quality instead of measuring it.
+Conversely, a file the tool itself failed to read or parse is never `excluded`: that's
+our failure, not an out-of-scope target, so it stays `unresolved` and keeps weighing
+on the rate.
 
-`diagnostics` (plafonné à `MAX_DIAGNOSTICS`, cf. `model.rs`) identifie, fichier et ligne
-à l'appui, chaque specifier `unresolved` ou `excluded` — un compte seul n'est pas
-auditable (§7). En contrepartie, il n'enregistre que le fait qu'un specifier a été
-exclu, jamais *pourquoi* (gitignoré ? dossier toujours exclu ? extension non
-revendiquée ?) : cette distinction n'existe qu'en le vérifiant à la main sur le disque
-(voir la limite correspondante dans le document de mesure, §12).
+`diagnostics` (capped at `MAX_DIAGNOSTICS`, cf. `model.rs`) identifies, with file and
+line, every `unresolved` or `excluded` specifier — a count alone isn't auditable (§7).
+In exchange, it only records the fact that a specifier was excluded, never *why*
+(gitignored? a directory always excluded? an unclaimed extension?): that distinction
+only exists by checking it by hand on disk (see the corresponding limitation in the
+measurement document, §12).
 
 ---
 
-## 6. Règles de résolution TypeScript
+## 6. TypeScript resolution rules
 
-Appliquées dans l'ordre, première correspondance retenue :
+Applied in order, first match wins:
 
-1. **Relatif** — `./x`, `../x` résolus depuis le répertoire de l'importeur.
-2. **Alias tsconfig** — table construite en suivant les chaînes `extends`, `paths`
-   interprétés relativement à `baseUrl` (ou au répertoire du tsconfig si absent). Le
-   tsconfig applicable est le plus proche en remontant l'arborescence.
-3. **Package du workspace** — `package.json` racine, champ `workspaces` ; un specifier
-   `@scope/pkg` correspondant à un package local est résolu vers son `main`/`exports`,
-   à défaut vers son `index.ts`.
-4. **Externe** — tout le reste. Enregistré dans `external_deps`, jamais en arête.
+1. **Relative** — `./x`, `../x` resolved from the importer's directory.
+2. **tsconfig alias** — table built by following `extends` chains, `paths`
+   interpreted relative to `baseUrl` (or to the tsconfig's directory if absent). The
+   applicable tsconfig is the closest one walking up the tree.
+3. **Workspace package** — root `package.json`, `workspaces` field; a specifier
+   `@scope/pkg` matching a local package is resolved to its `main`/`exports`,
+   failing that to its `index.ts`.
+4. **External** — everything else. Recorded in `external_deps`, never as an edge.
 
-Pour toute cible résolue, on essaie dans l'ordre : chemin exact, puis `.ts`, `.tsx`,
-`.js`, `.jsx`, puis `<dir>/index.{ts,tsx,js,jsx}`. Un specifier en `.js` est aussi
-tenté en `.ts` (convention ESM/NodeNext).
+For any resolved target, the order tried is: exact path, then `.ts`, `.tsx`,
+`.js`, `.jsx`, then `<dir>/index.{ts,tsx,js,jsx}`. A `.js` specifier is also
+tried as `.ts` (ESM/NodeNext convention).
 
-### Cas mesurés sur le projet de référence
+### Cases measured on the reference project
 
-| Cas | Compte | Traitement |
+| Case | Count | Treatment |
 | --- | ---: | --- |
-| `import type` | 303 | Résolu normalement — pointe vers de vrais fichiers |
-| Réexports `export … from` | 24 | Arête normale ; pas de traversée de barrel en v0 |
-| Fichiers `index.ts` | 5 | Résolution de répertoire |
-| Imports d'assets (`.png`) | 1 | Résolu (fichier réel trouvé sur disque), puis exclu — extension hors du périmètre revendiqué par l'extracteur TypeScript |
-| `import()` dynamique | 0 | Hors périmètre v0 |
+| `import type` | 303 | Resolved normally — points to real files |
+| `export … from` re-exports | 24 | Normal edge; no barrel traversal in v0 |
+| `index.ts` files | 5 | Directory resolution |
+| Asset imports (`.png`) | 1 | Resolved (real file found on disk), then excluded — extension outside the scope claimed by the TypeScript extractor |
+| Dynamic `import()` | 0 | Out of scope for v0 |
 
-Ces chiffres montrent que la difficulté réelle se réduit aux alias et à l'extension
-absente. Le reste est marginal.
+These figures show that the real difficulty comes down to aliases and the missing
+extension. The rest is marginal.
 
 ---
 
-## 7. Erreurs — jamais silencieuses
+## 7. Errors — never silent
 
-| Situation | Comportement |
+| Situation | Behaviour |
 | --- | --- |
-| Racine absente ou illisible | **Échec immédiat**, code de sortie non nul |
-| Fichier non parsable | Sauté, consigné dans `stats.failures`, le scan continue |
-| Import non résolu | Compté dans `stats.unresolved`, jamais jeté en silence |
-| tsconfig illisible ou invalide | Avertissement, résolution relative seule sur ce sous-arbre |
+| Root missing or unreadable | **Immediate failure**, non-zero exit code |
+| File not parsable | Skipped, logged in `stats.failures`, the scan continues |
+| Import not resolved | Counted in `stats.unresolved`, never dropped silently |
+| tsconfig unreadable or invalid | Warning, relative resolution only on this subtree |
 
-Aucun filtre ne doit *fail open* : un filtre qui ne peut pas s'appliquer exclut plutôt
-que d'inclure au hasard.
+No filter should *fail open*: a filter that cannot apply excludes rather than
+including at random.
 
 ---
 
 ## 8. Tests
 
-Fixtures synthétiques minuscules, une par règle de résolution, sur le modèle de dejavu
-(1 777 LOC, 51 tests) :
+Tiny synthetic fixtures, one per resolution rule, on the model set by dejavu
+(1,777 LOC, 51 tests):
 
-- import relatif, simple et remontant
-- alias tsconfig, avec et sans `baseUrl`
-- chaîne `extends` sur deux niveaux
-- package de workspace monorepo
-- résolution de répertoire vers `index.ts`
-- extension absente et specifier `.js` → fichier `.ts`
-- specifier non résoluble → compté, non fatal
-- fichier non parsable → consigné, scan poursuivi
+- relative import, simple and upward-traversing
+- tsconfig alias, with and without `baseUrl`
+- `extends` chain two levels deep
+- monorepo workspace package
+- directory resolution to `index.ts`
+- missing extension and a `.js` specifier → `.ts` file
+- unresolvable specifier → counted, not fatal
+- unparsable file → logged, scan continues
 
-La surface testée est `extractors/typescript.rs`, pas le parcours de fichiers.
-
----
-
-## 9. Gate d'acceptation
-
-La v0 est « terminée » quand, et seulement quand :
-
-1. `kog scan` sur le projet monorepo de référence (727 fichiers) affiche un
-   **`resolution_rate` ≥ 0,95**, mesuré et imprimé, jamais estimé.
-2. `kog scan` sur un projet simple (93 fichiers, alias `@/*`) produit un graphe
-   cohérent.
-3. La page sigma affiche le graphe du monorepo et reste fluide au pan/zoom.
-4. CI verte : `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`, gitleaks.
-
-Tant que ces quatre points ne sont pas réunis, rien d'autre ne commence.
+The surface under test is `extractors/typescript.rs`, not file traversal.
 
 ---
 
-## 10. Hors périmètre v0
+## 9. Acceptance gate
 
-Règle d'arrêt, pas abandon. Aucune ligne de code sur : Tauri et `src-tauri/`, clustering
-Leiden, multi-projets, chat IA et permissions, calques (code mort, code IA non relu,
-activité récente), **graphe de sessions** — bien que le parseur de transcripts de dejavu
-soit disponible et prêt —, jauge de quota, gestionnaire MCP, vérificateur de diff,
-synchronisation CLAUDE.md.
+v0 is "done" when, and only when:
 
-Chacun de ces morceaux est plus stimulant que la résolution d'alias, ce qui est
-exactement pourquoi ils feraient dérailler la v0. Si l'un devient nécessaire en cours de
-route, la question est posée avant d'être tranchée.
+1. `kog scan` on the reference monorepo project (727 files) shows a
+   **`resolution_rate` ≥ 0.95**, measured and printed, never estimated.
+2. `kog scan` on a simple project (93 files, `@/*` alias) produces a coherent
+   graph.
+3. The sigma page displays the monorepo graph and stays smooth on pan/zoom.
+4. Green CI: `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`, gitleaks.
+
+Until these four points are met, nothing else begins.
 
 ---
 
-## 11. Après la gate
+## 10. Out of scope for v0
 
-| Version | Contenu | Ce que ça prouve |
+A stopping rule, not abandonment. No line of code on: Tauri and `src-tauri/`,
+Leiden clustering, multi-project, AI chat and permissions, overlays (dead code,
+unreviewed AI code, recent activity), **session graph** — even though dejavu's
+transcript parser is available and ready —, quota gauge, MCP manager, diff checker,
+CLAUDE.md sync.
+
+Every one of these pieces is more exciting than alias resolution, which is exactly
+why they would derail v0. If one becomes necessary along the way, the question gets
+asked before it gets settled.
+
+---
+
+## 11. After the gate
+
+| Version | Content | What it proves |
 | --- | --- | --- |
-| v0.2 | Extracteur Go (nœud = package) | Que le trait `Extractor` tient sur un second modèle de nœud |
-| v0.3 | Coque Tauri autour du crate | Que le cœur se distribue en binaire unique |
-| ensuite | Multi-projets, Leiden, calques, pilotage | La vision complète |
+| v0.2 | Go extractor (node = package) | That the `Extractor` trait holds up on a second node model |
+| v0.3 | Tauri shell around the crate | That the core distributes as a single binary |
+| next | Multi-project, Leiden, overlays, steering | The full vision |
 
-Swift n'entrera qu'avec le niveau symbole, et sera documenté comme tel d'ici là.
-
----
-
-## 12. Réemploi de dejavu
-
-À récupérer depuis `~/apps/dejavu` : licences MIT + Apache-2.0, `.gitleaks.toml`,
-`rust-toolchain.toml`, workflow CI, `CODE_OF_CONDUCT.md`, `CONTRIBUTING.md`,
-`SECURITY.md`, templates d'issues et de PR.
-
-Le parseur de transcripts (`adapters/claude_code.rs`, 278 lignes, 9 tests) alimentera le
-graphe de sessions — **après** la v0.
+Swift will only enter with the symbol level, and will be documented as such until then.
 
 ---
 
-## 13. v0.1 — `kog` sans argument
+## 12. Reuse from dejavu
 
-Premier retour sur la v0 une fois la gate passée : voir un graphe exigeait trois
-commandes, un clone du dépôt et `bun` — `kog scan ~/projet -o
-app/public/graph.json`, puis `cd app && bun run dev`. Ça contredit directement le
-différenciateur affiché face au concurrent (§3.7, §11) : « un seul binaire, zéro
-dépendance », alors que le concurrent Python mesuré au §1 a des issues pleines de
-douleur d'installation. Exiger un checkout du dépôt et une chaîne JS pour voir le
-résultat concède exactement ce que KOG prétend éviter. Cette feature est donc sur
-la trajectoire du projet, pas un confort ajouté.
+To pull from `~/apps/dejavu`: MIT + Apache-2.0 licenses, `.gitleaks.toml`,
+`rust-toolchain.toml`, CI workflow, `CODE_OF_CONDUCT.md`, `CONTRIBUTING.md`,
+`SECURITY.md`, issue and PR templates.
 
-Décisions :
-
-- `ROOT` a pour valeur par défaut `.` sur `scan` comme sur `view` — taper un chemin
-  devient optionnel partout.
-- `kog` sans sous-commande équivaut explicitement à `kog view .`, câblé dans
-  le setup clap plutôt que laissé à un comportement implicite.
-- `--stats-only` disparaît : `scan` n'écrit un fichier que si `-o` est donné, plutôt que
-  d'écrire par défaut et de proposer un drapeau pour s'en abstenir. Même comportement,
-  moins de surface.
-- `view` ne touche jamais le disque : le graphe est gardé en mémoire et servi tel quel.
-  Lancer `kog` dans son projet ne doit jamais laisser un `graph.json` derrière soi.
-
-La page (`app/dist`, produite par `bun run build`) est embarquée dans le binaire via
-`rust-embed`, servie par `tiny_http` — synchrone, donc aucun runtime async n'entre dans
-le binaire — et le navigateur est ouvert via `open`. Le serveur écoute sur `127.0.0.1`
-uniquement (c'est la structure du code source de l'utilisateur qui est servie ; jamais
-`0.0.0.0`), sur un port choisi par l'OS (bind sur le port 0, lu après coup) plutôt qu'un
-port fixe comme 4173/5173, qui pourrait déjà être pris. L'URL est imprimée avant
-l'ouverture du navigateur, pour rester utile en SSH ou si l'ouverture échoue.
-
-`crates/kog-cli/build.rs` vérifie que `app/dist/index.html` existe avant de
-compiler et échoue avec la commande exacte pour le produire (`cd app && bun install &&
-bun run build`) plutôt que de laisser la macro `rust-embed` échouer avec un « file not
-found » qui n'oriente vers rien. Il émet aussi `cargo:rerun-if-changed` sur `app/dist` :
-sans ça, une page reconstruite resterait embarquée obsolète dans le prochain binaire
-compilé — le mode d'échec le plus coûteux à découvrir tard.
+The transcript parser (`adapters/claude_code.rs`, 278 lines, 9 tests) will feed the
+session graph — **after** v0.
 
 ---
 
-## Annexe — environnement de référence
+## 13. v0.1 — `kog` with no argument
 
-Machine de développement, vérifiée le 2026-08-06 :
+First feedback on v0 once the gate was passed: seeing a graph required three
+commands, a repo clone and `bun` — `kog scan ~/project -o
+app/public/graph.json`, then `cd app && bun run dev`. That directly contradicts the
+differentiator claimed against the competitor (§3.7, §11): "one binary, zero
+dependencies", when the Python competitor measured in §1 has issues full of
+install pain. Requiring a repo checkout and a JS toolchain to see the result
+concedes exactly what KOG claims to avoid. This feature is therefore on the
+project's trajectory, not an added convenience.
+
+Decisions:
+
+- `ROOT` defaults to `.` on both `scan` and `view` — typing a path becomes
+  optional everywhere.
+- `kog` with no subcommand explicitly means `kog view .`, wired into the clap
+  setup rather than left to implicit behaviour.
+- `--stats-only` goes away: `scan` only writes a file if `-o` is given, rather
+  than writing by default and offering a flag to opt out. Same behaviour, less
+  surface.
+- `view` never touches disk: the graph is kept in memory and served as-is.
+  Running `kog` in your project must never leave a `graph.json` behind.
+
+The page (`app/dist`, produced by `bun run build`) is embedded in the binary via
+`rust-embed`, served by `tiny_http` — synchronous, so no async runtime enters the
+binary — and the browser is opened via `open`. The server listens on `127.0.0.1`
+only (it's the structure of the user's own source code being served; never
+`0.0.0.0`), on a port chosen by the OS (bind on port 0, read back afterwards) rather
+than a fixed port like 4173/5173, which might already be taken. The URL is printed
+before the browser opens, to stay useful over SSH or if opening fails.
+
+`crates/kog-cli/build.rs` checks that `app/dist/index.html` exists before
+compiling and fails with the exact command to produce it (`cd app && bun install &&
+bun run build`) rather than letting the `rust-embed` macro fail with a "file not
+found" that points nowhere. It also emits `cargo:rerun-if-changed` on `app/dist`:
+without that, a rebuilt page would stay embedded, stale, in the next compiled binary
+— the most expensive failure mode to discover late.
+
+---
+
+## Appendix — reference environment
+
+Development machine, verified on 2026-08-06:
 
 - cargo 1.97.1, toolchain `stable-aarch64-apple-darwin`.
-  `~/.cargo/bin` **absent du PATH non interactif** — à corriger avant le premier build.
+  `~/.cargo/bin` **missing from the non-interactive PATH** — fix before the first build.
 - node v22.23.2, bun 1.3.8
-- Xcode CLT présents
-- `gh` authentifié sur le compte cible
+- Xcode CLT present
+- `gh` authenticated on the target account

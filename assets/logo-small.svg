@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="KOG">
+  <title>KOG</title>
+  <!--
+    Small-size variant, for 16-24 px: favicon, tab strip, tight UI.
+    Six satellites instead of eight and heavier weights, because at 16 px the
+    full mark's spokes and discs merge into an indistinct star.
+  -->
+  <g stroke="currentColor" stroke-width="5" stroke-linecap="round">
+    <path d="M32 32 54 32" />
+    <path d="M32 32 43 51.05" />
+    <path d="M32 32 21 51.05" />
+    <path d="M32 32 10 32" />
+    <path d="M32 32 21 12.95" />
+    <path d="M32 32 43 12.95" />
+  </g>
+  <g fill="currentColor">
+    <circle cx="54" cy="32" r="7" />
+    <circle cx="43" cy="51.05" r="7" />
+    <circle cx="21" cy="51.05" r="7" />
+    <circle cx="10" cy="32" r="7" />
+    <circle cx="21" cy="12.95" r="7" />
+    <circle cx="43" cy="12.95" r="7" />
+  </g>
+  <circle cx="32" cy="32" r="12" fill="currentColor" />
+</svg>

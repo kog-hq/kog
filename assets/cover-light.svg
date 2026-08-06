@@ -16,10 +16,10 @@
     </linearGradient>
   </defs>
 
-  <rect width="1200" height="380" fill="#FFFFFF"/>
+  <!-- <rect width="1200" height="380" fill="#FFFFFF"/>
   <rect width="1200" height="380" fill="url(#d-wash)"/>
   <ellipse cx="880" cy="150" rx="300" ry="220" fill="url(#d-glow)"/>
-  <ellipse cx="960" cy="290" rx="240" ry="180" fill="url(#d-glow2)"/>
+  <ellipse cx="960" cy="290" rx="240" ry="180" fill="url(#d-glow2)"/> -->
 
   <!-- Left: mark, wordmark, line. -->
   <g transform="translate(96 96)">

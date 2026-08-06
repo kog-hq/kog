@@ -10,7 +10,7 @@
     "unicorn/filename-case": [
       "error",
       {
-        "case": "snakeCase"
+        "case": "kebabCase"
       }
     ]
   }

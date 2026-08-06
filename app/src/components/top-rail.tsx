@@ -2,8 +2,7 @@ import { Moon, Search, Sun } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { CoverageMeter } from "@/components/meter";
-import type { LabelMode } from "@/graph/graph_canvas";
-import type { ColourBy } from "@/graph/build";
+import type { LabelMode } from "@/graph/graph-canvas";
 import type { KogProject, KogWorkspace } from "@/lib/kog";
 import { formatCount, formatRate, sourceCoverage } from "@/lib/kog";
 
@@ -15,14 +14,27 @@ function Mark({ className }: { className?: string }) {
   });
   return (
     <svg viewBox="0 0 64 64" className={className} role="img" aria-label="KOG">
-      <g stroke="currentColor" strokeWidth="2.75" strokeLinecap="round" opacity="0.55">
+      <g
+        stroke="currentColor"
+        strokeWidth="2.75"
+        strokeLinecap="round"
+        opacity="0.55"
+      >
         {spokes.map((spoke) => (
-          <path key={`${spoke.x}-${spoke.y}`} d={`M32 32 ${spoke.x} ${spoke.y}`} />
+          <path
+            key={`${spoke.x}-${spoke.y}`}
+            d={`M32 32 ${spoke.x} ${spoke.y}`}
+          />
         ))}
       </g>
       <g fill="currentColor">
         {spokes.map((spoke) => (
-          <circle key={`c-${spoke.x}-${spoke.y}`} cx={spoke.x} cy={spoke.y} r="4.6" />
+          <circle
+            key={`c-${spoke.x}-${spoke.y}`}
+            cx={spoke.x}
+            cy={spoke.y}
+            r="4.6"
+          />
         ))}
       </g>
       <circle cx="32" cy="32" r="9.5" fill="currentColor" />
@@ -32,11 +44,6 @@ function Mark({ className }: { className?: string }) {
 
 const LABEL_MODES: LabelMode[] = ["none", "hubs", "more", "all"];
 
-const COLOUR_MODES: { value: ColourBy; label: string }[] = [
-  { value: "state", label: "colour: state" },
-  { value: "folder", label: "colour: folder" },
-];
-
 export function TopRail({
   workspace,
   project,
@@ -44,8 +51,6 @@ export function TopRail({
   onSearch,
   labelMode,
   onLabelMode,
-  colourBy,
-  onColourBy,
   theme,
   onTheme,
 }: {
@@ -55,16 +60,15 @@ export function TopRail({
   onSearch: () => void;
   labelMode: LabelMode;
   onLabelMode: (mode: LabelMode) => void;
-  colourBy: ColourBy;
-  onColourBy: (mode: ColourBy) => void;
   theme: "light" | "dark";
   onTheme: () => void;
 }) {
   const coverage = project.graph.stats.coverage;
-  const root = workspace.root.split("/").filter(Boolean).pop() ?? workspace.root;
+  const root =
+    workspace.root.split("/").filter(Boolean).pop() ?? workspace.root;
 
   return (
-    <header className="flex h-11 shrink-0 items-center gap-3 border-b border-border bg-card px-3">
+    <header className="glass absolute left-3 right-3 top-3 z-10 flex h-11 items-center gap-3 px-3">
       <div className="flex shrink-0 items-center gap-2">
         <Mark className="size-4 text-foreground" />
         <span className="text-[13px] tracking-tight">KOG</span>
@@ -90,7 +94,10 @@ export function TopRail({
           </select>
         </label>
       ) : (
-        <span className="truncate text-[12px] text-muted-foreground" title={workspace.root}>
+        <span
+          className="truncate text-[12px] text-muted-foreground"
+          title={workspace.root}
+        >
           {root}
         </span>
       )}
@@ -102,7 +109,9 @@ export function TopRail({
       >
         <Search className="size-3.5" />
         <span className="flex-1">Find a file</span>
-        <kbd className="rounded border border-border px-1 py-0.5 text-[10px]">⌘K</kbd>
+        <kbd className="rounded border border-border px-1 py-0.5 text-[10px]">
+          ⌘K
+        </kbd>
       </button>
 
       {/* The thesis, always on screen: how much of this codebase is really
@@ -117,21 +126,6 @@ export function TopRail({
           </span>
         </div>
       </div>
-
-      <label className="flex shrink-0 items-center gap-1.5">
-        <span className="sr-only">What colour means</span>
-        <select
-          value={colourBy}
-          onChange={(event) => onColourBy(event.target.value as ColourBy)}
-          className="h-7 cursor-pointer rounded-md border border-border bg-background px-2 text-[12px] outline-none hover:bg-accent"
-        >
-          {COLOUR_MODES.map((mode) => (
-            <option key={mode.value} value={mode.value}>
-              {mode.label}
-            </option>
-          ))}
-        </select>
-      </label>
 
       <label className="flex shrink-0 items-center gap-1.5">
         <span className="sr-only">Labels</span>
@@ -155,7 +149,11 @@ export function TopRail({
         aria-label={theme === "dark" ? "Switch to light" : "Switch to dark"}
         className={cn("size-7 shrink-0")}
       >
-        {theme === "dark" ? <Sun className="size-3.5" /> : <Moon className="size-3.5" />}
+        {theme === "dark" ? (
+          <Sun className="size-3.5" />
+        ) : (
+          <Moon className="size-3.5" />
+        )}
       </Button>
     </header>
   );

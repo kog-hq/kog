@@ -18,7 +18,9 @@ function Block({
       <header className="mb-2 flex items-baseline justify-between">
         <h3 className="eyebrow">{title}</h3>
         {count !== undefined && (
-          <span className="num text-[11px] text-muted-foreground">{formatCount(count)}</span>
+          <span className="num text-[11px] text-muted-foreground">
+            {formatCount(count)}
+          </span>
         )}
       </header>
       {children}
@@ -59,7 +61,9 @@ function FileList({
             className="row flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-left"
           >
             <span className="text-muted-foreground">{icon}</span>
-            <span className="truncate text-[12px]">{index.label.get(id) ?? id}</span>
+            <span className="truncate text-[12px]">
+              {index.label.get(id) ?? id}
+            </span>
           </button>
         </li>
       ))}
@@ -85,10 +89,12 @@ export function Inspector({
   const diagnostics = index.diagnosticsByFile.get(node.id) ?? [];
 
   return (
-    <aside className="scrollbar-slim flex h-full w-[300px] shrink-0 flex-col overflow-y-auto border-l border-border bg-card">
+    <aside className="glass slide-in scrollbar-slim absolute bottom-11 right-3 top-[60px] flex w-[304px] flex-col overflow-y-auto">
       <header className="flex items-start gap-2 px-3 py-3">
         <div className="min-w-0 flex-1">
-          <h2 className="break-all text-[13px] leading-snug text-foreground">{node.id}</h2>
+          <h2 className="break-all text-[13px] leading-snug text-foreground">
+            {node.id}
+          </h2>
           <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
             <span
               className={cn(
@@ -116,7 +122,9 @@ export function Inspector({
 
       <div className="grid grid-cols-3 gap-2 border-t border-border px-3 py-2.5 text-[11px]">
         <div>
-          <div className="num text-[13px] text-foreground">{formatCount(dependents.length)}</div>
+          <div className="num text-[13px] text-foreground">
+            {formatCount(dependents.length)}
+          </div>
           <div className="eyebrow mt-1">used by</div>
         </div>
         <div>
@@ -135,8 +143,9 @@ export function Inspector({
 
       {node.kind === "unread_source" && (
         <p className="border-t border-border bg-signal-soft px-3 py-2.5 text-[11px] leading-relaxed text-signal">
-          KOG has no extractor for {node.lang} yet. This file is in the graph and other files
-          can point at it, but its own imports are missing from the map.
+          KOG has no extractor for {node.lang} yet. This file is in the graph
+          and other files can point at it, but its own imports are missing from
+          the map.
         </p>
       )}
 
@@ -145,9 +154,12 @@ export function Inspector({
           <ul className="flex flex-col gap-1.5">
             {diagnostics.map((diagnostic, position) => (
               <li key={`${diagnostic.line}-${position}`} className="px-1.5">
-                <div className="truncate text-[12px] text-signal">{diagnostic.specifier}</div>
+                <div className="truncate text-[12px] text-signal">
+                  {diagnostic.specifier}
+                </div>
                 <div className="text-[11px] text-muted-foreground">
-                  line {diagnostic.line} · {diagnostic.reason.replace(/_/g, " ")}
+                  line {diagnostic.line} ·{" "}
+                  {diagnostic.reason.replace(/_/g, " ")}
                 </div>
               </li>
             ))}

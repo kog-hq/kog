@@ -10,7 +10,8 @@ if (!root) throw new Error("missing #root");
 function fail(target: HTMLElement, message: string): void {
   target.replaceChildren();
   const box = document.createElement("div");
-  box.className = "flex h-full items-center justify-center px-6 text-center text-signal";
+  box.className =
+    "flex h-full items-center justify-center px-6 text-center text-signal";
   box.textContent = message;
   target.append(box);
 }
@@ -24,7 +25,10 @@ fetch("/graph.json")
   })
   .then((workspace) => {
     if (!workspace.projects?.length) {
-      fail(root, "This scan holds no project. Run `kog scan` to see what it found.");
+      fail(
+        root,
+        "This scan holds no project. Run `kog scan` to see what it found.",
+      );
       return;
     }
     createRoot(root).render(

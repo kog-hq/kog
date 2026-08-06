@@ -123,11 +123,14 @@ export function FindFile({
 
         {results.length === 0 ? (
           <p className="px-3 py-6 text-center text-[12px] text-muted-foreground">
-            No file matches “{query}”. Paths are matched as written, so try a fragment of the
-            real path.
+            No file matches “{query}”. Paths are matched as written, so try a
+            fragment of the real path.
           </p>
         ) : (
-          <ul ref={listRef} className="scrollbar-slim max-h-[46vh] overflow-y-auto py-1">
+          <ul
+            ref={listRef}
+            className="scrollbar-slim max-h-[46vh] overflow-y-auto py-1"
+          >
             {results.map((node, position) => (
               <li key={node.id}>
                 <button
@@ -149,7 +152,9 @@ export function FindFile({
                           : "bg-foreground/60",
                     )}
                   />
-                  <span className="min-w-0 flex-1 truncate text-[12px]">{node.id}</span>
+                  <span className="min-w-0 flex-1 truncate text-[12px]">
+                    {node.id}
+                  </span>
                   <span className="shrink-0 text-[11px] text-muted-foreground">
                     {node.kind === "source" ? node.lang : KIND_LABEL[node.kind]}
                   </span>

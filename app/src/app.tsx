@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { GraphCanvas, defaultLabelMode, type LabelMode } from "@/graph/graph_canvas";
-import type { ColourBy } from "@/graph/build";
-import { FindFile } from "@/components/find_file";
+import {
+  GraphCanvas,
+  defaultLabelMode,
+  type LabelMode,
+} from "@/graph/graph-canvas";
+import { FindFile } from "@/components/find-file";
 import { Inspector } from "@/components/inspector";
 import { Sidebar, type Filters } from "@/components/sidebar";
-import { TopRail } from "@/components/top_rail";
+import { TopRail } from "@/components/top-rail";
 import {
   indexProject,
   formatCount,
@@ -20,7 +23,9 @@ const THEME_KEY = "kog:theme";
 function storedTheme(): Theme {
   const stored = localStorage.getItem(THEME_KEY);
   if (stored === "light" || stored === "dark") return stored;
-  return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+  return window.matchMedia("(prefers-color-scheme: light)").matches
+    ? "light"
+    : "dark";
 }
 
 const ALL_KINDS: NodeKind[] = ["source", "unread_source", "asset"];
@@ -32,7 +37,6 @@ export function App({ workspace }: { workspace: KogWorkspace }) {
   const [hovered, setHovered] = useState<string | null>(null);
   const [searching, setSearching] = useState(false);
   const [groupByFolder, setGroupByFolder] = useState(false);
-  const [colourBy, setColourBy] = useState<ColourBy>("state");
   const [filters, setFilters] = useState<Filters>({
     languages: null,
     kinds: new Set(ALL_KINDS),
@@ -63,7 +67,10 @@ export function App({ workspace }: { workspace: KogWorkspace }) {
       if ((event.metaKey || event.ctrlKey) && event.key === "k") {
         event.preventDefault();
         setSearching(true);
-      } else if (event.key === "/" && !(event.target instanceof HTMLInputElement)) {
+      } else if (
+        event.key === "/" &&
+        !(event.target instanceof HTMLInputElement)
+      ) {
         event.preventDefault();
         setSearching(true);
       } else if (event.key === "Escape") {
@@ -87,8 +94,10 @@ export function App({ workspace }: { workspace: KogWorkspace }) {
     for (const node of project.graph.nodes) {
       if (!filters.kinds.has(node.kind)) continue;
       if (filters.languages && !filters.languages.has(node.lang)) continue;
-      if (filters.hideIsolated && (index.degree.get(node.id) ?? 0) === 0) continue;
-      if (filters.onlyUnresolved && !index.diagnosticsByFile.has(node.id)) continue;
+      if (filters.hideIsolated && (index.degree.get(node.id) ?? 0) === 0)
+        continue;
+      if (filters.onlyUnresolved && !index.diagnosticsByFile.has(node.id))
+        continue;
       keep.add(node.id);
     }
     if (!groupByFolder) return keep;
@@ -110,7 +119,22 @@ export function App({ workspace }: { workspace: KogWorkspace }) {
   const stats = project.graph.stats;
 
   return (
-    <div className="flex h-full flex-col">
+    // The canvas runs the full window, and every panel floats over it. A map
+    // squeezed into the space four opaque columns left over is a smaller map.
+    <div className="relative h-full overflow-hidden">
+      <GraphCanvas
+        project={project}
+        index={index}
+        visible={visible}
+        selected={selected}
+        hovered={hovered}
+        labelMode={labelMode}
+        groupByFolder={groupByFolder}
+        theme={theme}
+        onSelect={onSelect}
+        onHover={onHover}
+      />
+
       <TopRail
         workspace={workspace}
         project={project}
@@ -118,68 +142,57 @@ export function App({ workspace }: { workspace: KogWorkspace }) {
         onSearch={() => setSearching(true)}
         labelMode={labelMode}
         onLabelMode={setLabelMode}
-        colourBy={colourBy}
-        onColourBy={setColourBy}
         theme={theme}
         onTheme={() => setTheme(theme === "dark" ? "light" : "dark")}
       />
 
-      <div className="flex min-h-0 flex-1">
-        <Sidebar
-          project={project}
+      <Sidebar
+        project={project}
+        index={index}
+        filters={filters}
+        onFilters={setFilters}
+        groupByFolder={groupByFolder}
+        onGroupByFolder={setGroupByFolder}
+        theme={theme}
+        onSelect={setSelected}
+        onHover={setHovered}
+      />
+
+      {project.graph.edges.length === 0 && (
+        <p className="pointer-events-none absolute inset-x-0 top-1/2 mx-auto max-w-md -translate-y-1/2 px-6 text-center text-[12px] leading-relaxed text-muted-foreground">
+          No file in this project imports another. Every dot is real — there is
+          simply nothing connecting them, which is worth knowing.
+        </p>
+      )}
+
+      {selectedNode && (
+        <Inspector
+          node={selectedNode}
           index={index}
-          filters={filters}
-          onFilters={setFilters}
-          groupByFolder={groupByFolder}
-          onGroupByFolder={setGroupByFolder}
-          colourBy={colourBy}
-          theme={theme}
           onSelect={setSelected}
           onHover={setHovered}
+          onClose={() => setSelected(null)}
         />
+      )}
 
-        <main className="relative min-w-0 flex-1">
-          <GraphCanvas
-            project={project}
-            index={index}
-            visible={visible}
-            selected={selected}
-            hovered={hovered}
-            labelMode={labelMode}
-            groupByFolder={groupByFolder}
-            colourBy={colourBy}
-            theme={theme}
-            onSelect={onSelect}
-            onHover={onHover}
-          />
-          {project.graph.edges.length === 0 && (
-            <div className="pointer-events-none absolute inset-x-0 top-1/2 mx-auto max-w-md -translate-y-1/2 px-6 text-center text-[12px] leading-relaxed text-muted-foreground">
-              No file in this project imports another. Every dot is real — there is simply
-              nothing connecting them, which is worth knowing.
-            </div>
-          )}
-        </main>
-
-        {selectedNode && (
-          <Inspector
-            node={selectedNode}
-            index={index}
-            onSelect={setSelected}
-            onHover={setHovered}
-            onClose={() => setSelected(null)}
-          />
-        )}
-      </div>
-
-      <footer className="flex h-7 shrink-0 items-center gap-4 border-t border-border bg-card px-3 text-[11px] text-muted-foreground">
+      <footer className="glass absolute bottom-3 left-3 right-3 flex h-8 items-center gap-4 px-3 text-[11px] text-muted-foreground">
         <span className="num">
-          <span className="text-foreground">{formatCount(stats.coverage.files_seen)}</span> files
+          <span className="text-foreground">
+            {formatCount(stats.coverage.files_seen)}
+          </span>{" "}
+          files
         </span>
         <span className="num">
-          <span className="text-foreground">{formatCount(project.graph.edges.length)}</span> edges
+          <span className="text-foreground">
+            {formatCount(project.graph.edges.length)}
+          </span>{" "}
+          edges
         </span>
         <span className="num">
-          <span className="text-foreground">{formatRate(stats.resolution_rate)}</span> resolution
+          <span className="text-foreground">
+            {formatRate(stats.resolution_rate)}
+          </span>{" "}
+          resolution
         </span>
         {stats.coverage.files_unsupported > 0 && (
           <span className="num text-signal">

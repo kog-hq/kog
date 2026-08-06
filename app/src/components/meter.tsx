@@ -42,7 +42,10 @@ export function CoverageMeter({
       {showLegend && (
         <div className="flex items-center justify-between text-[11px] text-muted-foreground">
           <span className="num">
-            <span className="text-foreground">{formatCount(coverage.files_analysed)}</span> read
+            <span className="text-foreground">
+              {formatCount(coverage.files_analysed)}
+            </span>{" "}
+            read
           </span>
           {coverage.files_unsupported > 0 && (
             <span className="num text-signal">

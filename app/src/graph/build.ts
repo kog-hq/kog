@@ -12,24 +12,23 @@ import forceAtlas2 from "graphology-layout-forceatlas2";
 import type { KogProject, NodeKind, ProjectIndex } from "@/lib/kog";
 import { dirName } from "@/lib/kog";
 import {
-  FOLDER_SLOTS,
-  NEUTRAL,
-  STATE_COLOUR,
-  folderKey,
-  swatch,
-  type NodeState,
+  canvasTheme,
+  languageColour,
+  shadeKey,
+  type CanvasTheme,
+  type Theme,
 } from "@/lib/palette";
 
-export type ColourBy = "state" | "folder";
-
-export type Theme = "light" | "dark";
+/** What is true about a file, drawn as a ring rather than as a fill. */
+export type NodeState = "fine" | "gap" | "unread";
 
 export type NodeAttributes = {
   label: string;
   size: number;
   color: string;
+  /** The ring. Equal to `color` when there is nothing to say. */
+  borderColor: string;
   state: NodeState;
-  folder: string;
   kind: NodeKind;
   lang: string;
   /** Files behind this node: one, unless folders are collapsed. */
@@ -38,55 +37,30 @@ export type NodeAttributes = {
   y: number;
 };
 
-export function readCanvasTheme(theme: Theme) {
-  const style = getComputedStyle(document.documentElement);
-  const value = (name: string) => style.getPropertyValue(name).trim();
-  return {
-    mode: theme,
-    edge: value("--edge"),
-    labelHalo: value("--label-halo"),
-    label: value("--foreground"),
-    background: value("--background"),
-    signal: value("--color-signal") || "#e0457b",
-    focus: value("--color-focus") || "#4a90d9",
-  };
-}
-
-export type CanvasTheme = ReturnType<typeof readCanvasTheme>;
-
-/** What the file is, as far as the map is concerned. */
-export function stateOf(id: string, kind: NodeKind, index: ProjectIndex): NodeState {
-  if (kind === "unread_source") return "unread";
-  if (kind === "asset") return "asset";
-  return index.diagnosticsByFile.has(id) ? "gap" : "read";
-}
-
-export function colourOf(
-  state: NodeState,
-  folder: string,
-  mode: ColourBy,
+export function stateOf(
+  id: string,
+  kind: NodeKind,
   index: ProjectIndex,
-  theme: Theme,
-): string {
-  // The two signals win in both modes: a file KOG could not read is drawn as
-  // one wherever it sits, or the colour means nothing.
-  if (mode === "state" || state === "unread" || state === "asset") {
-    return swatch(STATE_COLOUR[state], theme);
-  }
-  const slot = index.folderSlot.get(folder);
-  return swatch(slot === undefined ? NEUTRAL : FOLDER_SLOTS[slot], theme);
+): NodeState {
+  if (kind === "unread_source") return "unread";
+  if (kind === "asset") return "fine";
+  return index.diagnosticsByFile.has(id) ? "gap" : "fine";
 }
 
-/** A ring is the second channel: the signal never rests on hue alone. */
-export function ringOf(state: NodeState, theme: CanvasTheme): string | null {
+/** The ring colour, or the fill when the file has nothing to report. */
+export function ringOf(
+  state: NodeState,
+  fill: string,
+  theme: CanvasTheme,
+): string {
   if (state === "unread") return theme.signal;
-  if (state === "gap") return swatch(STATE_COLOUR.gap, theme.mode);
-  return null;
+  if (state === "gap") return theme.warn;
+  return fill;
 }
 
 function sizeFor(degree: number, kind: NodeKind): number {
-  const base = 2.4 + Math.sqrt(degree) * 1.7;
-  return kind === "asset" ? base * 0.62 : base;
+  const base = 2.6 + Math.sqrt(degree) * 1.7;
+  return kind === "asset" ? base * 0.6 : base;
 }
 
 export type BuildOptions = {
@@ -102,9 +76,34 @@ export type BuildOptions = {
 export function buildGraph(
   project: KogProject,
   index: ProjectIndex,
+  theme: Theme,
   options: BuildOptions,
 ): Graph {
   const graph = new Graph({ type: "directed", multi: false });
+  const canvas = canvasTheme(theme);
+
+  const add = (
+    id: string,
+    label: string,
+    lang: string,
+    kind: NodeKind,
+    state: NodeState,
+    members: string[],
+  ) => {
+    const fill = languageColour(lang, kind === "asset", theme, shadeKey(id));
+    graph.addNode(id, {
+      label,
+      size: 2,
+      color: fill,
+      borderColor: ringOf(state, fill, canvas),
+      state,
+      kind,
+      lang,
+      members,
+      x: Math.random(),
+      y: Math.random(),
+    });
+  };
 
   if (options.groupByFolder) {
     const members = new Map<string, string[]>();
@@ -115,31 +114,32 @@ export function buildGraph(
       else members.set(folder, [node.id]);
     }
     for (const [folder, files] of members) {
-      // A folder takes the state of its worst file: one unread file in a
-      // package is what the reader needs to see, not the nine that are fine.
+      // A folder takes the state of its worst file — one unread file in a
+      // package is what the reader needs to see, not the nine that are fine —
+      // and the language of whatever it mostly holds.
       const states = files.map((id) => {
         const node = index.byId.get(id);
-        return node ? stateOf(id, node.kind, index) : "asset";
+        return node ? stateOf(id, node.kind, index) : "fine";
       });
       const state: NodeState = states.includes("unread")
         ? "unread"
         : states.includes("gap")
           ? "gap"
-          : states.includes("read")
-            ? "read"
-            : "asset";
-      graph.addNode(folder, {
-        label: folder,
-        size: 3,
-        color: NEUTRAL.dark,
-        state,
-        folder: folderKey(`${folder}/x`),
-        kind: index.byId.get(files[0])?.kind ?? "asset",
-        lang: index.byId.get(files[0])?.lang ?? "",
-        members: files,
-        x: Math.random(),
-        y: Math.random(),
-      });
+          : "fine";
+
+      const langs = new Map<string, number>();
+      let kind: NodeKind = "asset";
+      for (const id of files) {
+        const node = index.byId.get(id);
+        if (!node) continue;
+        langs.set(node.lang, (langs.get(node.lang) ?? 0) + 1);
+        if (node.kind === "source") kind = "source";
+        else if (node.kind === "unread_source" && kind === "asset")
+          kind = "unread_source";
+      }
+      const lang =
+        [...langs.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "";
+      add(folder, folder, lang, kind, state, files);
     }
     for (const edge of project.graph.edges) {
       const from = dirName(edge.source);
@@ -149,18 +149,14 @@ export function buildGraph(
     }
   } else {
     for (const node of project.graph.nodes) {
-      graph.addNode(node.id, {
-        label: index.label.get(node.id) ?? node.id,
-        size: 2,
-        color: NEUTRAL.dark,
-        state: stateOf(node.id, node.kind, index),
-        folder: folderKey(node.id),
-        kind: node.kind,
-        lang: node.lang,
-        members: [node.id],
-        x: Math.random(),
-        y: Math.random(),
-      });
+      add(
+        node.id,
+        index.label.get(node.id) ?? node.id,
+        node.lang,
+        node.kind,
+        stateOf(node.id, node.kind, index),
+        [node.id],
+      );
     }
     for (const edge of project.graph.edges) {
       if (graph.hasNode(edge.source) && graph.hasNode(edge.target)) {
@@ -194,18 +190,21 @@ export function buildGraph(
   return graph;
 }
 
-/** Recolour in place: a theme or mode change never relayouts, and never jumps. */
-export function recolour(
-  graph: Graph,
-  index: ProjectIndex,
-  mode: ColourBy,
-  theme: Theme,
-): void {
+/** Recolour in place: a theme change never relayouts, and never jumps. */
+export function recolour(graph: Graph, theme: Theme): void {
+  const canvas = canvasTheme(theme);
   graph.forEachNode((node, attributes) => {
+    const fill = languageColour(
+      attributes.lang as string,
+      (attributes.kind as NodeKind) === "asset",
+      theme,
+      shadeKey(node),
+    );
+    graph.setNodeAttribute(node, "color", fill);
     graph.setNodeAttribute(
       node,
-      "color",
-      colourOf(attributes.state as NodeState, attributes.folder as string, mode, index, theme),
+      "borderColor",
+      ringOf(attributes.state as NodeState, fill, canvas),
     );
   });
 }

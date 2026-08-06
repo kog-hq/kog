@@ -23,6 +23,18 @@ export type FieldOptions = {
   radius: number;
   /** How far a node at the very centre is pushed, in graph units. */
   strength: number;
+  /**
+   * A hole at the middle of the field, as a fraction of the radius, where
+   * nothing is pushed at all.
+   *
+   * Without it the effect eats its own purpose: the node you are reaching
+   * for is the one most strongly shoved away, so it slides out from under
+   * the pointer and cannot be clicked. With it, the crowd parts *around*
+   * whatever you are pointing at, which is both what you wanted and what
+   * you can hit — and it keeps the drawn position of the target in step
+   * with the position sigma hit-tests against.
+   */
+  hole: number;
 };
 
 /** Below this, a node is settled and leaves the active set. */
@@ -72,14 +84,18 @@ export class CursorField {
    * Advance one frame. Returns true while anything is still moving, so the
    * caller can stop its loop the moment the graph is at rest.
    */
-  step(cursor: { x: number; y: number } | null, options: FieldOptions): boolean {
+  step(
+    cursor: { x: number; y: number } | null,
+    options: FieldOptions,
+  ): boolean {
     if (cursor) this.push(cursor, options);
     return this.settle(options);
   }
 
   /** Add velocity to every node the cursor is currently near. */
   private push(cursor: { x: number; y: number }, options: FieldOptions): void {
-    const { radius, strength } = options;
+    const { radius, strength, hole } = options;
+    const quiet = radius * hole;
     const reach = Math.ceil(radius / this.cell);
     const cx = Math.floor(cursor.x / this.cell);
     const cy = Math.floor(cursor.y / this.cell);
@@ -94,17 +110,22 @@ export class CursorField {
           const dx = point.x - cursor.x;
           const dy = point.y - cursor.y;
           const distance = Math.hypot(dx, dy);
-          if (distance > radius) continue;
+          if (distance > radius || distance <= quiet) continue;
 
-          // Falls off with the square of the distance, so the effect is a
-          // soft dome rather than a hard bubble with an edge.
-          const falloff = (1 - distance / radius) ** 2;
-          // A node exactly under the cursor has no direction to flee in;
-          // give it one rather than dividing by zero.
-          const angle = distance < 1e-6 ? Math.random() * Math.PI * 2 : Math.atan2(dy, dx);
+          // Zero at both ends — at the hole's edge and at the field's — and
+          // strongest between them, so the graph opens as a ring around the
+          // pointer rather than as a bubble with a hard edge.
+          const across = (distance - quiet) / (radius - quiet);
+          const falloff = Math.sin(across * Math.PI) ** 2;
+          const angle = Math.atan2(dy, dx);
           const force = strength * falloff;
 
-          const current = this.active.get(node) ?? { ox: 0, oy: 0, vx: 0, vy: 0 };
+          const current = this.active.get(node) ?? {
+            ox: 0,
+            oy: 0,
+            vx: 0,
+            vy: 0,
+          };
           current.vx += Math.cos(angle) * force;
           current.vy += Math.sin(angle) * force;
           this.active.set(node, current);

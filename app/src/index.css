@@ -2,20 +2,18 @@
 @import "@fontsource-variable/jetbrains-mono";
 
 /*
- * KOG's palette is not a generic dark-tool palette: it is taken from the
- * repository's own artwork (`assets/cover-dark.svg`), so the application and
- * the README look like one thing.
+ * The chrome around the map: quiet, so the map is the loud thing.
  *
- * Two accents, one meaning each, never decorative:
+ * Node colours live in `lib/palette.ts` — a canvas is painted by the
+ * renderer, not by CSS, and splitting them across both is how a theme change
+ * ends up half applied. What is here is the interface: surfaces, borders,
+ * text, and the two accents it shares with the canvas.
  *
  *   signal  (#E0457B)  what KOG could not read, or could not resolve
  *   focus   (#4A90D9)  what you are inspecting right now
  *
- * Everything else is grey. If a colour appears in this interface, it is
- * carrying information.
- *
- * The variable names below are shadcn/ui's contract, filled with KOG's
- * values — so its components work untouched and still look like this project.
+ * The variable names are shadcn/ui's contract, filled with KOG's values — so
+ * its components work untouched and still look like this project.
  */
 
 @theme {
@@ -53,12 +51,6 @@
   --input: #2c2d35;
   --ring: #4a90d9;
 
-  /* Canvas colours, read by the renderer rather than by Tailwind. */
-  --edge: #2f3038;
-  --node-saturation: 65%;
-  --node-lightness: 57%;
-  --label-halo: rgba(13, 13, 15, 0.82);
-
   color-scheme: dark;
 }
 
@@ -81,11 +73,6 @@
   --border: #e4e4ea;
   --input: #d8d8e0;
   --ring: #4a90d9;
-
-  --edge: #c9c9d3;
-  --node-saturation: 62%;
-  --node-lightness: 44%;
-  --label-halo: rgba(251, 251, 253, 0.85);
 
   color-scheme: light;
 }
@@ -114,7 +101,6 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
-  --color-edge: var(--edge);
 }
 
 @layer base {
@@ -163,6 +149,38 @@
 }
 
 @layer utilities {
+  /* Panels float over a canvas that runs edge to edge, so the map is never
+     boxed in by the instrument reading it. Translucent rather than opaque:
+     the graph continuing behind a panel is what tells you it is one surface
+     and not four. */
+  .glass {
+    background: color-mix(in srgb, var(--card) 82%, transparent);
+    border: 1px solid color-mix(in srgb, var(--border) 90%, transparent);
+    border-radius: 12px;
+    backdrop-filter: blur(18px) saturate(140%);
+    box-shadow:
+      0 1px 2px rgb(0 0 0 / 0.04),
+      0 12px 32px -12px rgb(0 0 0 / 0.18);
+  }
+
+  :root[data-theme="dark"] .glass {
+    box-shadow:
+      0 1px 2px rgb(0 0 0 / 0.4),
+      0 16px 40px -16px rgb(0 0 0 / 0.7);
+  }
+
+  /* The inspector arrives from the edge it lives on. */
+  .slide-in {
+    animation: slide-in 220ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  @keyframes slide-in {
+    from {
+      opacity: 0;
+      transform: translateX(12px);
+    }
+  }
+
   /* One label style, used for every section heading and column header. */
   .eyebrow {
     font-size: 10px;

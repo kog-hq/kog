@@ -3,17 +3,10 @@ import { EdgeArrowProgram } from "sigma/rendering";
 import type { Settings } from "sigma/settings";
 import type { NodeDisplayData, PartialButFor } from "sigma/types";
 import { useEffect, useMemo, useRef } from "react";
-import { CursorField } from "./cursor_field";
-import {
-  buildGraph,
-  readCanvasTheme,
-  recolour,
-  ringOf,
-  type CanvasTheme,
-  type ColourBy,
-  type Theme,
-} from "./build";
-import type { NodeState } from "@/lib/palette";
+import { createNodeBorderProgram } from "@sigma/node-border";
+import { CursorField } from "./cursor-field";
+import { buildGraph, recolour } from "./build";
+import { canvasTheme, type CanvasTheme, type Theme } from "@/lib/palette";
 import type { KogProject, ProjectIndex } from "@/lib/kog";
 
 export type LabelMode = "none" | "hubs" | "more" | "all";
@@ -40,7 +33,28 @@ export function defaultLabelMode(nodeCount: number): LabelMode {
 const REVEAL_MS = 620;
 
 /** The cursor's reach, in screen pixels, converted to graph units per frame. */
-const FIELD_RADIUS_PX = 120;
+const FIELD_RADIUS_PX = 150;
+
+/**
+ * The middle of the field, where nothing moves, as a fraction of the radius.
+ * Everything inside it stays exactly where sigma thinks it is, so what you
+ * are pointing at is always what you click.
+ */
+const FIELD_HOLE = 0.34;
+
+/**
+ * Nodes wear their state as a ring: the fill says which language, the ring
+ * says whether KOG could read it. One channel each, both always on.
+ */
+const NodeWithRing = createNodeBorderProgram({
+  borders: [
+    {
+      color: { attribute: "borderColor", defaultValue: "#888888" },
+      size: { value: 0.22 },
+    },
+    { color: { attribute: "color" }, size: { fill: true } },
+  ],
+});
 
 function prefersReducedMotion(): boolean {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -54,7 +68,6 @@ export type CanvasState = {
   hovered: string | null;
   labelMode: LabelMode;
   groupByFolder: boolean;
-  colourBy: ColourBy;
   theme: Theme;
 };
 
@@ -75,7 +88,10 @@ type Props = CanvasState & {
 function labelDrawer(theme: CanvasTheme, bold = false) {
   return (
     context: CanvasRenderingContext2D,
-    data: PartialButFor<NodeDisplayData, "x" | "y" | "size" | "label" | "color">,
+    data: PartialButFor<
+      NodeDisplayData,
+      "x" | "y" | "size" | "label" | "color"
+    >,
     settings: Settings,
   ): void => {
     if (!data.label) return;
@@ -106,7 +122,10 @@ function hoverDrawer(theme: CanvasTheme, phase: () => number) {
   const label = labelDrawer(theme, true);
   return (
     context: CanvasRenderingContext2D,
-    data: PartialButFor<NodeDisplayData, "x" | "y" | "size" | "label" | "color">,
+    data: PartialButFor<
+      NodeDisplayData,
+      "x" | "y" | "size" | "label" | "color"
+    >,
     settings: Settings,
   ): void => {
     const breath = phase();
@@ -131,7 +150,6 @@ export function GraphCanvas(props: Props) {
     hovered,
     labelMode,
     groupByFolder,
-    colourBy,
     theme,
     onSelect,
     onHover,
@@ -145,13 +163,16 @@ export function GraphCanvas(props: Props) {
   // times a second to move a highlight by two pixels.
   const reveal = useRef(1);
   const breath = useRef(0);
-  const rings = useRef(new Map<string, string>());
 
   // The layout is the expensive part, so it is tied to what actually changes
   // its shape: the project and whether folders are collapsed. Filters,
   // selection, colour mode and hover never reach here.
   const graph = useMemo(
-    () => buildGraph(project, index, { groupByFolder }),
+    () => buildGraph(project, index, theme, { groupByFolder }),
+    // Deliberately not keyed on the theme: a theme change recolours in
+    // place. Relaying out a 2,800-node graph to change its palette would
+    // throw away the shape the reader had just learned.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [project, index, groupByFolder],
   );
 
@@ -171,20 +192,22 @@ export function GraphCanvas(props: Props) {
 
   useEffect(() => {
     if (!container.current) return;
-    const canvasTheme = readCanvasTheme(theme);
+    const canvas = canvasTheme(theme);
     const renderer = new Sigma(graph, container.current, {
       renderEdgeLabels: false,
-      defaultEdgeColor: canvasTheme.edge,
+      defaultEdgeColor: canvas.edgeMuted,
       // Arrows are registered but never the default: 3,000 arrowheads at low
       // zoom is noise. The reducer promotes an edge to an arrow only while it
       // is being read.
       edgeProgramClasses: { arrow: EdgeArrowProgram },
+      defaultNodeType: "bordered",
+      nodeProgramClasses: { bordered: NodeWithRing },
       labelFont: '"JetBrains Mono Variable", ui-monospace, monospace',
       labelSize: 11.5,
       labelWeight: "500",
       labelGridCellSize: 72,
-      defaultDrawNodeLabel: labelDrawer(canvasTheme),
-      defaultDrawNodeHover: hoverDrawer(canvasTheme, () => breath.current),
+      defaultDrawNodeLabel: labelDrawer(canvas),
+      defaultDrawNodeHover: hoverDrawer(canvas, () => breath.current),
       zIndex: true,
     });
     sigma.current = renderer;
@@ -222,7 +245,8 @@ export function GraphCanvas(props: Props) {
         // Both are read from the camera, so the effect is the same size on
         // screen whatever the zoom.
         radius: FIELD_RADIUS_PX * renderer.getCamera().ratio * scale(),
-        strength: 2.2 * renderer.getCamera().ratio * scale(),
+        strength: 1.6 * renderer.getCamera().ratio * scale(),
+        hole: FIELD_HOLE,
       });
       renderer.refresh({ skipIndexation: true });
       if (cursor || active) raf = requestAnimationFrame(tick);
@@ -277,7 +301,10 @@ export function GraphCanvas(props: Props) {
     let raf = 0;
     const step = () => {
       const elapsed = performance.now() - started;
-      reveal.current = Math.min(1, 1 - Math.pow(2, (-10 * elapsed) / REVEAL_MS));
+      reveal.current = Math.min(
+        1,
+        1 - Math.pow(2, (-10 * elapsed) / REVEAL_MS),
+      );
       sigma.current?.refresh({ skipIndexation: true });
       if (elapsed < REVEAL_MS) raf = requestAnimationFrame(step);
       else reveal.current = 1;
@@ -297,7 +324,9 @@ export function GraphCanvas(props: Props) {
     const started = performance.now();
     let raf = 0;
     const step = () => {
-      breath.current = (1 - Math.cos(((performance.now() - started) / 1500) * Math.PI * 2)) / 2;
+      breath.current =
+        (1 - Math.cos(((performance.now() - started) / 1500) * Math.PI * 2)) /
+        2;
       sigma.current?.refresh({ skipIndexation: true });
       raf = requestAnimationFrame(step);
     };
@@ -310,27 +339,20 @@ export function GraphCanvas(props: Props) {
   useEffect(() => {
     const renderer = sigma.current;
     if (!renderer) return;
-    const canvasTheme = readCanvasTheme(theme);
-    recolour(graph, index, colourBy, theme);
-
-    // The ring is the second channel that keeps "not read" and "has a gap"
-    // legible without relying on hue — including for a reader who cannot
-    // separate magenta from teal.
-    rings.current = new Map();
-    graph.forEachNode((node, attributes) => {
-      const ring = ringOf(attributes.state as NodeState, canvasTheme);
-      if (ring) rings.current.set(node, ring);
-    });
+    const canvas = canvasTheme(theme);
+    recolour(graph, theme);
 
     renderer.setSetting("nodeReducer", (node, data) => {
       if (visible && !visible.has(node)) return { ...data, hidden: true };
       const size = data.size * reveal.current;
 
       if (node === selected) {
+        // The fill still says which language: a selection that repainted the
+        // node would hide the one thing colour is for.
         return {
           ...data,
-          color: canvasTheme.focus,
-          size: size * (1.45 + breath.current * 0.12),
+          borderColor: canvas.focus,
+          size: size * (1.4 + breath.current * 0.1),
           zIndex: 3,
           forceLabel: true,
         };
@@ -345,7 +367,13 @@ export function GraphCanvas(props: Props) {
         // Dimmed and shrunk rather than hidden: the shape of the whole is
         // the context that makes a neighbourhood mean anything, but it has
         // to stop competing while you read one.
-        return { ...data, color: canvasTheme.edge, size: size * 0.55, label: "", zIndex: 0 };
+        return {
+          ...data,
+          color: canvas.edge,
+          size: size * 0.55,
+          label: "",
+          zIndex: 0,
+        };
       }
       return { ...data, size };
     });
@@ -363,7 +391,7 @@ export function GraphCanvas(props: Props) {
           return {
             ...data,
             type: "arrow",
-            color: canvasTheme.focus,
+            color: canvas.focus,
             size: 1.4 + breath.current * 0.5,
             zIndex: 2,
           };
@@ -372,21 +400,24 @@ export function GraphCanvas(props: Props) {
           return {
             ...data,
             type: "arrow",
-            color: canvasTheme.label,
+            color: canvas.label,
             size: 1 + breath.current * 0.4,
             zIndex: 2,
           };
         }
-        return { ...data, color: canvasTheme.edge, size: 0.18 };
+        return { ...data, color: canvas.edge, size: 0.18 };
       }
-      return { ...data, color: canvasTheme.edge, size: 0.45 };
+      return { ...data, color: canvas.edge, size: 0.45 };
     });
 
-    renderer.setSetting("defaultDrawNodeLabel", labelDrawer(canvasTheme));
-    renderer.setSetting("defaultDrawNodeHover", hoverDrawer(canvasTheme, () => breath.current));
-    renderer.setSetting("defaultEdgeColor", canvasTheme.edge);
+    renderer.setSetting("defaultDrawNodeLabel", labelDrawer(canvas));
+    renderer.setSetting(
+      "defaultDrawNodeHover",
+      hoverDrawer(canvas, () => breath.current),
+    );
+    renderer.setSetting("defaultEdgeColor", canvas.edgeMuted);
     renderer.refresh();
-  }, [graph, index, visible, selected, focus, colourBy, theme]);
+  }, [graph, index, visible, selected, focus, theme]);
 
   useEffect(() => {
     const renderer = sigma.current;
@@ -395,7 +426,11 @@ export function GraphCanvas(props: Props) {
     renderer.setSetting("renderLabels", labelMode !== "none");
     renderer.setSetting("labelRenderedSizeThreshold", mode.threshold);
     renderer.setSetting("labelDensity", mode.density);
-    renderer.refresh({ skipIndexation: true });
+    // A full refresh, deliberately: which labels get drawn is decided from
+    // sigma's label grid, and `skipIndexation` is exactly what skips
+    // rebuilding it — so the setting landed but nothing changed on screen
+    // until some other interaction forced a real refresh.
+    renderer.refresh();
   }, [labelMode]);
 
   // Selecting from the search dialog, the inspector or the gap list has to

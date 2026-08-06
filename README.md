@@ -26,7 +26,7 @@ language has to prove to be added.
 ## Install
 
 ```
-git clone https://github.com/bstcoc/kog
+git clone https://github.com/kog-hq/kog
 cd kog
 just install
 ```

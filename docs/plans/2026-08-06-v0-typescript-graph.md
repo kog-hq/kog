@@ -105,7 +105,7 @@ members = ["crates/kog-graph", "crates/kog-cli"]
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/bstcoc/kog"
+repository = "https://github.com/kog-hq/kog"
 
 [workspace.dependencies]
 anyhow = "1"

@@ -144,7 +144,7 @@ impl TypeScriptExtractor {
                 let target_str = target.to_str()?;
                 Some(PathBuf::from(target_str.replace('*', rest)))
             }
-            // Exact mapping: `@mastore/shared-types` -> one file.
+            // Exact mapping: `@acme/shared-types` -> one file.
             None if pattern == raw => Some(target.to_path_buf()),
             None => None,
         }
@@ -293,7 +293,7 @@ impl TypeScriptExtractor {
     /// KOG graphs source, not build output — the original design
     /// ("resolved to its `main`/`exports`, else `index.ts`") is correct for
     /// a runtime resolver but wrong here: on the acceptance target,
-    /// `@mastore/shared-types` declares `main` and `exports["."].import`
+    /// `@acme/shared-types` declares `main` and `exports["."].import`
     /// both pointing at a gitignored `dist/index.js`, while
     /// `exports["."].types` (and the older top-level `types`) point at the
     /// real TypeScript source. Following `exports`/`main` literally landed
@@ -755,14 +755,14 @@ export * from "./barrel";"#,
             &dir,
             "tsconfig.json",
             r#"{ "compilerOptions": { "paths": {
-                "@mastore/shared-types": ["./packages/shared-types/src/index.ts"]
+                "@acme/shared-types": ["./packages/shared-types/src/index.ts"]
             } } }"#,
         );
         write(&dir, "packages/shared-types/src/index.ts", "");
         write(&dir, "apps/web/a.ts", "");
         let e = TypeScriptExtractor::new(dir.path());
         let root = canonical(&dir);
-        let got = e.resolve("@mastore/shared-types", &root.join("apps/web/a.ts"));
+        let got = e.resolve("@acme/shared-types", &root.join("apps/web/a.ts"));
         assert_eq!(
             got,
             Resolution::Internal(root.join("packages/shared-types/src/index.ts"))
@@ -889,12 +889,12 @@ export * from "./barrel";"#,
         write(
             &dir,
             "packages/shared-types/package.json",
-            r#"{ "name": "@mastore/shared-types", "main": "./src/index.ts" }"#,
+            r#"{ "name": "@acme/shared-types", "main": "./src/index.ts" }"#,
         );
         write(&dir, "packages/shared-types/src/index.ts", "");
         let e = TypeScriptExtractor::new(dir.path());
         let root = canonical(&dir);
-        let got = e.resolve("@mastore/shared-types", &root.join("apps/web/a.ts"));
+        let got = e.resolve("@acme/shared-types", &root.join("apps/web/a.ts"));
         assert_eq!(
             got,
             Resolution::Internal(root.join("packages/shared-types/src/index.ts"))
@@ -914,7 +914,7 @@ export * from "./barrel";"#,
             &dir,
             "packages/shared-types/package.json",
             r#"{
-                "name": "@mastore/shared-types",
+                "name": "@acme/shared-types",
                 "main": "./dist/index.js",
                 "exports": { ".": {
                     "types": "./src/index.ts",
@@ -927,7 +927,7 @@ export * from "./barrel";"#,
         write(&dir, "packages/shared-types/dist/index.js", "");
         let e = TypeScriptExtractor::new(dir.path());
         let root = canonical(&dir);
-        let got = e.resolve("@mastore/shared-types", &root.join("apps/backend/a.ts"));
+        let got = e.resolve("@acme/shared-types", &root.join("apps/backend/a.ts"));
         assert_eq!(
             got,
             Resolution::Internal(root.join("packages/shared-types/src/index.ts"))
@@ -944,7 +944,7 @@ export * from "./barrel";"#,
             &dir,
             "packages/shared-types/package.json",
             r#"{
-                "name": "@mastore/shared-types",
+                "name": "@acme/shared-types",
                 "main": "./dist/index.js",
                 "types": "./src/index.ts"
             }"#,
@@ -953,7 +953,7 @@ export * from "./barrel";"#,
         write(&dir, "packages/shared-types/dist/index.js", "");
         let e = TypeScriptExtractor::new(dir.path());
         let root = canonical(&dir);
-        let got = e.resolve("@mastore/shared-types", &root.join("apps/backend/a.ts"));
+        let got = e.resolve("@acme/shared-types", &root.join("apps/backend/a.ts"));
         assert_eq!(
             got,
             Resolution::Internal(root.join("packages/shared-types/src/index.ts"))
@@ -967,12 +967,12 @@ export * from "./barrel";"#,
         write(
             &dir,
             "packages/shared-types/package.json",
-            r#"{ "name": "@mastore/shared-types" }"#,
+            r#"{ "name": "@acme/shared-types" }"#,
         );
         write(&dir, "packages/shared-types/utils.ts", "");
         let e = TypeScriptExtractor::new(dir.path());
         let root = canonical(&dir);
-        let got = e.resolve("@mastore/shared-types/utils", &root.join("apps/web/a.ts"));
+        let got = e.resolve("@acme/shared-types/utils", &root.join("apps/web/a.ts"));
         assert_eq!(
             got,
             Resolution::Internal(root.join("packages/shared-types/utils.ts"))
@@ -986,12 +986,12 @@ export * from "./barrel";"#,
         write(
             &dir,
             "packages/shared-types/package.json",
-            r#"{ "name": "@mastore/shared-types" }"#,
+            r#"{ "name": "@acme/shared-types" }"#,
         );
         write(&dir, "packages/shared-types/index.ts", "");
         let e = TypeScriptExtractor::new(dir.path());
         let root = canonical(&dir);
-        let got = e.resolve("@mastore/shared-types", &root.join("apps/web/a.ts"));
+        let got = e.resolve("@acme/shared-types", &root.join("apps/web/a.ts"));
         assert_eq!(
             got,
             Resolution::Internal(root.join("packages/shared-types/index.ts"))
@@ -1007,11 +1007,11 @@ export * from "./barrel";"#,
         write(
             &dir,
             "packages/shared-types/package.json",
-            r#"{ "name": "@mastore/shared-types", "main": "./dist/index.js" }"#,
+            r#"{ "name": "@acme/shared-types", "main": "./dist/index.js" }"#,
         );
         let e = TypeScriptExtractor::new(dir.path());
         assert_eq!(
-            e.resolve("@mastore/shared-types", &dir.path().join("apps/web/a.ts")),
+            e.resolve("@acme/shared-types", &dir.path().join("apps/web/a.ts")),
             Resolution::Unresolved
         );
     }
@@ -1023,7 +1023,7 @@ export * from "./barrel";"#,
         write(
             &dir,
             "packages/shared-types/package.json",
-            r#"{ "name": "@mastore/shared-types" }"#,
+            r#"{ "name": "@acme/shared-types" }"#,
         );
         let e = TypeScriptExtractor::new(dir.path());
         assert_eq!(
@@ -1035,7 +1035,7 @@ export * from "./barrel";"#,
     #[test]
     fn a_tsconfig_alias_wins_over_a_workspace_package_when_both_cover_the_specifier() {
         // On the acceptance target, cross-package imports like
-        // `@mastore/shared-types` are covered by *both* a tsconfig alias
+        // `@acme/shared-types` are covered by *both* a tsconfig alias
         // and a workspace package; rule 2 (alias) must keep winning over
         // rule 3 (workspace package) — this is the ordering guarantee the
         // acceptance target depends on.
@@ -1044,7 +1044,7 @@ export * from "./barrel";"#,
             &dir,
             "tsconfig.json",
             r#"{ "compilerOptions": { "paths": {
-                "@mastore/shared-types": ["./packages/shared-types/src/index.ts"]
+                "@acme/shared-types": ["./packages/shared-types/src/index.ts"]
             } } }"#,
         );
         write(&dir, "packages/shared-types/src/index.ts", "");
@@ -1052,12 +1052,12 @@ export * from "./barrel";"#,
         write(
             &dir,
             "packages/shared-types/package.json",
-            r#"{ "name": "@mastore/shared-types", "main": "./dist/index.js" }"#,
+            r#"{ "name": "@acme/shared-types", "main": "./dist/index.js" }"#,
         );
         write(&dir, "packages/shared-types/dist/index.js", "");
         let e = TypeScriptExtractor::new(dir.path());
         let root = canonical(&dir);
-        let got = e.resolve("@mastore/shared-types", &root.join("apps/web/a.ts"));
+        let got = e.resolve("@acme/shared-types", &root.join("apps/web/a.ts"));
         // The tsconfig alias target, not the workspace package's `main`.
         assert_eq!(
             got,
@@ -1077,12 +1077,12 @@ export * from "./barrel";"#,
         write(
             &dir,
             "packages/shared-types/package.json",
-            r#"{ "name": "@mastore/shared-types" }"#,
+            r#"{ "name": "@acme/shared-types" }"#,
         );
         write(&dir, "packages/shared-types/index.ts", "");
         let e = TypeScriptExtractor::new(dir.path());
         let root = canonical(&dir);
-        let got = e.resolve("@mastore/shared-types", &root.join("apps/web/a.ts"));
+        let got = e.resolve("@acme/shared-types", &root.join("apps/web/a.ts"));
         assert_eq!(
             got,
             Resolution::Internal(root.join("packages/shared-types/index.ts"))
@@ -1194,12 +1194,12 @@ export * from "./barrel";"#,
         write(
             &dir,
             "packages/shared-types/package.json",
-            r#"{ "name": "@mastore/shared-types" }"#,
+            r#"{ "name": "@acme/shared-types" }"#,
         );
         write(&dir, "secret.ts", "");
         let e = TypeScriptExtractor::new(dir.path());
         let got = e.resolve(
-            "@mastore/shared-types/../../secret",
+            "@acme/shared-types/../../secret",
             &dir.path().join("apps/web/a.ts"),
         );
         assert_eq!(got, Resolution::Unresolved);

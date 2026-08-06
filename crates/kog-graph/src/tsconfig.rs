@@ -23,7 +23,7 @@ struct RawTsConfig {
 /// One `paths` entry, with its targets already made absolute.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PathMapping {
-    /// The alias as written, e.g. `@common/*` or `@mastore/shared-types`.
+    /// The alias as written, e.g. `@common/*` or `@acme/shared-types`.
     pub pattern: String,
     /// Absolute targets. A `*` inside is a placeholder, kept verbatim.
     pub targets: Vec<PathBuf>,
@@ -405,12 +405,12 @@ mod tests {
             &dir,
             "tsconfig.json",
             r#"{ "compilerOptions": { "paths": {
-                "@mastore/shared-types": ["./packages/shared-types/src/index.ts"]
+                "@acme/shared-types": ["./packages/shared-types/src/index.ts"]
             } } }"#,
         );
         let index = TsConfigIndex::build(dir.path());
         let mappings = index.mappings_for(&dir.path().join("a.ts"));
-        assert_eq!(mappings[0].pattern, "@mastore/shared-types");
+        assert_eq!(mappings[0].pattern, "@acme/shared-types");
         assert!(!mappings[0].pattern.contains('*'));
     }
 
@@ -693,16 +693,31 @@ mod tests {
 #[cfg(test)]
 mod real_project_tests {
     use super::*;
-    use std::path::Path;
 
-    /// Ignored by default: depends on a checkout that only exists on the
-    /// development machine. Run with `cargo test -- --ignored`.
+    /// Ignored by default: depends on a checkout that exists only on
+    /// whichever machine sets `KOG_REFERENCE_REPO` — the absolute path of a
+    /// real, alias-heavy TypeScript monorepo (the one this project was
+    /// originally measured against, design doc §3.4). Run with
+    /// `KOG_REFERENCE_REPO=/path/to/checkout cargo test -- --ignored`.
+    /// Skips cleanly, rather than failing, when the variable is unset or the
+    /// path does not exist, so any contributor can point it at their own
+    /// checkout without a machine-specific path ever being hardcoded into
+    /// the repository.
     #[test]
     #[ignore]
     fn the_reference_monorepo_exposes_its_aliases() {
-        let root = Path::new(env!("HOME")).join("Mastore/mastore-saas");
+        let root = match std::env::var_os("KOG_REFERENCE_REPO") {
+            Some(path) => PathBuf::from(path),
+            None => {
+                eprintln!("KOG_REFERENCE_REPO not set, skipping");
+                return;
+            }
+        };
         if !root.exists() {
-            eprintln!("reference checkout missing, skipping");
+            eprintln!(
+                "KOG_REFERENCE_REPO ({}) does not exist, skipping",
+                root.display()
+            );
             return;
         }
         let index = TsConfigIndex::build(&root);

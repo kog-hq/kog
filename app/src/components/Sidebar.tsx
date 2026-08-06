@@ -61,6 +61,7 @@ export function Sidebar({
   groupByFolder,
   onGroupByFolder,
   onSelect,
+  onHover,
 }: {
   project: KogProject;
   index: ProjectIndex;
@@ -69,6 +70,7 @@ export function Sidebar({
   groupByFolder: boolean;
   onGroupByFolder: (value: boolean) => void;
   onSelect: (id: string) => void;
+  onHover: (id: string | null) => void;
 }) {
   const { stats } = project.graph;
   const gaps = stats.coverage.extensions.filter((e) => e.status === "unsupported_language");
@@ -228,7 +230,12 @@ export function Sidebar({
       )}
 
       {stats.diagnostics.length > 0 && (
-        <Diagnostics diagnostics={stats.diagnostics} total={stats.unresolved + stats.excluded} onSelect={onSelect} />
+        <Diagnostics
+          diagnostics={stats.diagnostics}
+          total={stats.unresolved + stats.excluded}
+          onSelect={onSelect}
+          onHover={onHover}
+        />
       )}
 
       {stats.coverage.skipped_directories.length > 0 && (
@@ -252,10 +259,12 @@ function Diagnostics({
   diagnostics,
   total,
   onSelect,
+  onHover,
 }: {
   diagnostics: KogDiagnostic[];
   total: number;
   onSelect: (id: string) => void;
+  onHover: (id: string | null) => void;
 }) {
   const shown = diagnostics.slice(0, 60);
   return (
@@ -273,6 +282,8 @@ function Diagnostics({
             <button
               type="button"
               onClick={() => onSelect(diagnostic.path)}
+              onMouseEnter={() => onHover(diagnostic.path)}
+              onMouseLeave={() => onHover(null)}
               className="row w-full rounded-md px-1.5 py-1 text-left"
               title={`${diagnostic.path}:${diagnostic.line} — ${diagnostic.reason.replace(/_/g, " ")}`}
             >

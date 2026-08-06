@@ -30,11 +30,13 @@ function FileList({
   ids,
   index,
   onSelect,
+  onHover,
   icon,
 }: {
   ids: string[];
   index: ProjectIndex;
   onSelect: (id: string) => void;
+  onHover: (id: string | null) => void;
   icon: React.ReactNode;
 }) {
   if (ids.length === 0) {
@@ -47,6 +49,12 @@ function FileList({
           <button
             type="button"
             onClick={() => onSelect(id)}
+            // Pointing at a name in this list lights the file up in the
+            // graph: the panel and the canvas are two views of one thing.
+            onMouseEnter={() => onHover(id)}
+            onMouseLeave={() => onHover(null)}
+            onFocus={() => onHover(id)}
+            onBlur={() => onHover(null)}
             title={id}
             className="row flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-left"
           >
@@ -63,11 +71,13 @@ export function Inspector({
   node,
   index,
   onSelect,
+  onHover,
   onClose,
 }: {
   node: KogNode;
   index: ProjectIndex;
   onSelect: (id: string) => void;
+  onHover: (id: string | null) => void;
   onClose: () => void;
 }) {
   const dependents = index.dependents.get(node.id) ?? [];
@@ -150,6 +160,7 @@ export function Inspector({
           ids={dependents}
           index={index}
           onSelect={onSelect}
+          onHover={onHover}
           icon={<ArrowDownLeft className="size-3" />}
         />
       </Block>
@@ -159,6 +170,7 @@ export function Inspector({
           ids={dependencies}
           index={index}
           onSelect={onSelect}
+          onHover={onHover}
           icon={<ArrowUpRight className="size-3" />}
         />
       </Block>

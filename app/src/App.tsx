@@ -101,17 +101,6 @@ export function App({ workspace }: { workspace: KogWorkspace }) {
     return folders;
   }, [filters, project, index, groupByFolder]);
 
-  /** The selection and everything one hop away from it. */
-  const neighbourhood = useMemo(() => {
-    const anchor = selected ?? hovered;
-    if (!anchor) return null;
-    const set = new Set<string>([anchor]);
-    if (groupByFolder) return null;
-    for (const id of index.dependents.get(anchor) ?? []) set.add(id);
-    for (const id of index.dependencies.get(anchor) ?? []) set.add(id);
-    return set;
-  }, [selected, hovered, index, groupByFolder]);
-
   const selectedNode = selected ? index.byId.get(selected) : undefined;
   const onSelect = useCallback((id: string | null) => setSelected(id), []);
   const onHover = useCallback((id: string | null) => setHovered(id), []);
@@ -140,6 +129,7 @@ export function App({ workspace }: { workspace: KogWorkspace }) {
           groupByFolder={groupByFolder}
           onGroupByFolder={setGroupByFolder}
           onSelect={setSelected}
+          onHover={setHovered}
         />
 
         <main className="relative min-w-0 flex-1">
@@ -148,7 +138,7 @@ export function App({ workspace }: { workspace: KogWorkspace }) {
             index={index}
             visible={visible}
             selected={selected}
-            neighbourhood={neighbourhood}
+            hovered={hovered}
             labelMode={labelMode}
             groupByFolder={groupByFolder}
             theme={theme}
@@ -168,6 +158,7 @@ export function App({ workspace }: { workspace: KogWorkspace }) {
             node={selectedNode}
             index={index}
             onSelect={setSelected}
+            onHover={setHovered}
             onClose={() => setSelected(null)}
           />
         )}

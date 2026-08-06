@@ -1,0 +1,24 @@
+# Rust
+/target/
+**/*.rs.bk
+*.pdb
+
+# Test fixtures generated from real source code — reviewed examples only.
+# Only test cases with expected outputs belong in the repo, in
+# crates/*/tests/fixtures/ explicitly.
+/fixtures-raw/
+
+# Local state and config that must never be shared
+/.mycelium/
+config.local.toml
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# macOS
+.DS_Store
+
+# Subagent-driven development scratch (ledger, briefs, review packages)
+/.superpowers/

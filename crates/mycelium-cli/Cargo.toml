@@ -1,0 +1,20 @@
+[package]
+name = "mycelium-cli"
+description = "Command line interface for mycelium"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "mycelium"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+mycelium-graph = { path = "../mycelium-graph" }
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

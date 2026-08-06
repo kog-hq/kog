@@ -179,9 +179,10 @@ mycelium/
 | Module | Responsabilité | Dépend de |
 | --- | --- | --- |
 | `model.rs` | `Graph` / `Node` / `Edge` / `Stats`, serde. Agnostique du langage, zéro logique | — |
-| `extractor.rs` | Trait `Extractor` : `extensions()`, `extract(source) -> Vec<Specifier>`, `resolve(...)` | model |
-| `discover.rs` | Parcours, respect de `.gitignore`, filtrage par extensions déclarées | extractor |
-| `extractors/typescript.rs` | Grammaire tree-sitter TS/TSX, tsconfig, règles de résolution TS | extractor |
+| `extractor.rs` | Trait `Extractor` : `extensions()`, `extract(source) -> Vec<Specifier>`, `resolve(...)` | tsconfig |
+| `discover.rs` | Parcours, respect de `.gitignore`, filtrage par extensions déclarées | — |
+| `tsconfig.rs` | Lecture et fusion des tsconfig (`extends`, `paths`, `baseUrl`) — le cœur du parseur, 719 lignes | discover |
+| `extractors/typescript.rs` | Grammaire tree-sitter TS/TSX, règles de résolution TS | extractor, tsconfig |
 | `graph.rs` | Assemblage, déduplication, statistiques | tous |
 
 Le trait `Extractor` existe dès le premier jour. Ajouter Go doit être **un fichier**,
@@ -214,20 +215,46 @@ intervention.
   "stats": {
     "files_discovered": 727,
     "files_parsed": 727,
-    "specifiers_total": 4355,
-    "specifiers_internal": 3209,
-    "resolved": 3140,
-    "unresolved": 69,
-    "resolution_rate": 0.9785,
-    "external_specifiers": 1146,
+    "specifiers_total": 4375,
+    "specifiers_internal": 3211,
+    "resolved": 3160,
+    "unresolved": 0,
+    "excluded": 51,
+    "resolution_rate": 1.0,
+    "external_specifiers": 1164,
     "external_packages_distinct": 77,
-    "failures": []
+    "failures": [],
+    "diagnostics": [
+      {
+        "path": "apps/backend/prisma/seed-travaux.ts",
+        "line": 2,
+        "specifier": "../src/generated/prisma/client",
+        "kind": "excluded"
+      }
+    ]
   }
 }
 ```
 
-`resolution_rate` = `resolved / specifiers_internal`. Les externes sont hors du calcul :
-un `import react` n'a pas à pointer vers un fichier.
+Chiffres tels que mesurés sur la cible d'acceptation, voir
+`docs/measurements/2026-08-06-v0-gate.md`.
+
+`resolution_rate` = `resolved / (specifiers_internal - excluded)`. Les externes sont
+hors du calcul : un `import react` n'a pas à pointer vers un fichier. `excluded` est
+retiré du dénominateur pour la même raison : un specifier qui résout vers un vrai
+fichier délibérément hors périmètre (gitignoré, dossier toujours exclu, ou extension
+que l'extracteur ne revendique pas) n'est pas un échec du résolveur — le compter contre
+le taux sous-évaluerait la qualité du résolveur au lieu de la mesurer. À l'inverse, un
+fichier que l'outil lui-même n'a pas réussi à lire ou parser n'est jamais `excluded` :
+c'est notre échec, pas une cible hors périmètre, donc il reste `unresolved` et continue
+de peser sur le taux.
+
+`diagnostics` (plafonné à `MAX_DIAGNOSTICS`, cf. `model.rs`) identifie, fichier et ligne
+à l'appui, chaque specifier `unresolved` ou `excluded` — un compte seul n'est pas
+auditable (§7). En contrepartie, il n'enregistre que le fait qu'un specifier a été
+exclu, jamais *pourquoi* (gitignoré ? dossier toujours exclu ? extension non
+revendiquée ?) : cette distinction n'existe qu'en le vérifiant à la main sur le disque
+(voir la limite correspondante dans le document de mesure, §12).
 
 ---
 
@@ -255,7 +282,7 @@ tenté en `.ts` (convention ESM/NodeNext).
 | `import type` | 303 | Résolu normalement — pointe vers de vrais fichiers |
 | Réexports `export … from` | 24 | Arête normale ; pas de traversée de barrel en v0 |
 | Fichiers `index.ts` | 5 | Résolution de répertoire |
-| Imports d'assets (`.png`) | 1 | Non résolu, compté |
+| Imports d'assets (`.png`) | 1 | Résolu (fichier réel trouvé sur disque), puis exclu — extension hors du périmètre revendiqué par l'extracteur TypeScript |
 | `import()` dynamique | 0 | Hors périmètre v0 |
 
 Ces chiffres montrent que la difficulté réelle se réduit aux alias et à l'extension

@@ -1,0 +1,62 @@
+name: Bug report
+description: Something behaved differently than documented
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Describe what you expected and what you got instead.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you expected, and what you got instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. mycelium scan /path/to/project
+        2. ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Which part
+      options:
+        - Parser / extractor (reading TypeScript files)
+        - Import resolution (graph construction)
+        - Graph model (data structures)
+        - Renderer (output format)
+        - Other / not sure
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: mycelium version
+      placeholder: 0.1.0
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: OS
+      placeholder: macOS 15.2 / Ubuntu 24.04
+    validations:
+      required: true
+
+  - type: textarea
+    id: output
+    attributes:
+      label: Relevant output
+      description: Error message or unexpected output. Scrub if necessary.
+      render: shell

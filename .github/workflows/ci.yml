@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  rust:
+    name: fmt · clippy · test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Formatting
+        run: cargo fmt --all --check
+
+      - name: Lints
+        run: cargo clippy --all-targets --all-features
+
+      - name: Tests
+        run: cargo test --all-features
+
+  secrets:
+    name: no committed secrets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      # mycelium itself does not process credentials or personal data (see
+      # .gitleaks.toml) — but an accidentally committed secret (an API key
+      # pasted into a fixture, a token left in a commit message) is still a
+      # real incident for this repository like any other, so the whole
+      # history is scanned rather than a diff.
+      #
+      # gitleaks is invoked directly instead of through gitleaks-action: the
+      # action derives its scan range from the push event, which breaks after
+      # any history rewrite (it resolves <root>^ and aborts). Scanning the full
+      # clone is deterministic and behaves the same on pushes, PRs and forks.
+      - name: Install gitleaks
+        env:
+          GITLEAKS_VERSION: 8.30.1
+        run: |
+          curl -sSfL \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin gitleaks
+          gitleaks version
+
+      - name: Scan full history
+        run: gitleaks git --redact --verbose .

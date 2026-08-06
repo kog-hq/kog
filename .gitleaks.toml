@@ -1,0 +1,8 @@
+# gitleaks configuration for mycelium.
+#
+# This project parses TypeScript codebases into file/import graphs.
+# It does not process credentials or personal data, so gitleaks runs
+# with default rules only — no allowlists.
+
+[extend]
+useDefault = true

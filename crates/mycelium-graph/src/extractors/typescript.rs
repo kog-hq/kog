@@ -261,9 +261,9 @@ impl TypeScriptExtractor {
 
     /// A package's best entry-point candidate.
     ///
-    /// Kora graphs source, not build output — the original design ("resolved
-    /// to its `main`/`exports`, else `index.ts`") is correct for a runtime
-    /// resolver but wrong here: on the acceptance target,
+    /// Kora graphs source, not build output — the original design
+    /// ("resolved to its `main`/`exports`, else `index.ts`") is correct for
+    /// a runtime resolver but wrong here: on the acceptance target,
     /// `@mastore/shared-types` declares `main` and `exports["."].import`
     /// both pointing at a gitignored `dist/index.js`, while
     /// `exports["."].types` (and the older top-level `types`) point at the
@@ -320,6 +320,22 @@ impl TypeScriptExtractor {
             .get(field)
             .and_then(Value::as_str)
             .map(str::to_string)
+    }
+
+    /// Reduce a bare specifier to the package name it names: `@scope/name`
+    /// is the first two slash-separated segments, anything else is the
+    /// first segment alone. `next/link` and `next/navigation` both reduce
+    /// to `next`; `@tanstack/react-query/queryClient` reduces to
+    /// `@tanstack/react-query`; a bare `react` is returned unchanged.
+    fn package_name(raw: &str) -> String {
+        let mut segments = raw.split('/');
+        let first = segments.next().unwrap_or(raw);
+        if first.starts_with('@') {
+            if let Some(name) = segments.next() {
+                return format!("{first}/{name}");
+            }
+        }
+        first.to_string()
     }
 
     /// Only the simple `exports` shapes: a string, or an object with a
@@ -464,8 +480,14 @@ impl Extractor for TypeScriptExtractor {
             return Resolution::Unresolved;
         }
 
-        // 4. Anything else is a third-party package.
-        Resolution::External(raw.to_string())
+        // 4. Anything else is a third-party package. Reduced to the
+        //    *package* name, not the whole specifier: `next/link` and
+        //    `next/navigation` are the same dependency, `next`, and must
+        //    count once, not twice — this is what makes
+        //    `external_packages_distinct` (and each node's
+        //    `external_deps`) a package count rather than a count of
+        //    distinct import paths.
+        Resolution::External(Self::package_name(raw))
     }
 
     fn skipped_configs(&self) -> &[SkippedConfig] {
@@ -651,6 +673,36 @@ export * from "./barrel";"#,
     }
 
     #[test]
+    fn external_subpaths_reduce_to_the_package_name() {
+        // Without this, `next`, `next/link`, `next/navigation` would count
+        // as three distinct packages instead of one — see design §3.4 (77
+        // packages by hand) vs. the 95 distinct specifier strings the
+        // unreduced code actually produced on the acceptance target.
+        let dir = TempDir::new().unwrap();
+        let e = TypeScriptExtractor::new(dir.path());
+        let importer = dir.path().join("a.ts");
+        assert_eq!(
+            e.resolve("next/link", &importer),
+            Resolution::External("next".into())
+        );
+        assert_eq!(
+            e.resolve("next/navigation", &importer),
+            Resolution::External("next".into())
+        );
+        // A scoped package keeps its scope: only the third segment (the
+        // subpath) is dropped.
+        assert_eq!(
+            e.resolve("@tanstack/react-query/foo", &importer),
+            Resolution::External("@tanstack/react-query".into())
+        );
+        // A bare specifier with nothing to strip is unchanged.
+        assert_eq!(
+            e.resolve("react", &importer),
+            Resolution::External("react".into())
+        );
+    }
+
+    #[test]
     fn an_alias_whose_target_is_missing_is_unresolved_not_external() {
         // Mirrors `@prisma/generated` on the reference monorepo: the mapping
         // exists but the generated directory has never been built.
@@ -731,9 +783,9 @@ export * from "./barrel";"#,
     fn exports_types_wins_over_exports_import_pointing_at_dist() {
         // The real shape on the acceptance target: `main` and
         // `exports["."].import` both point at a gitignored `dist/`, while
-        // `exports["."].types` points at the real TypeScript source. Kora
-        // graphs source, not build output, so `types` must win. **Load-
-        // bearing**: see the fix report for the break/restore proof.
+        // `exports["."].types` points at the real TypeScript source.
+        // Kora graphs source, not build output, so `types` must win.
+        // **Load-bearing**: see the fix report for the break/restore proof.
         let dir = TempDir::new().unwrap();
         write(&dir, "package.json", r#"{ "workspaces": ["packages/*"] }"#);
         write(

@@ -169,10 +169,23 @@ impl TypeScriptExtractor {
     }
 
     /// Expand one glob pattern (a single `*` per path segment, e.g.
-    /// `apps/*` or `packages/*`) to the directories it matches.
-    /// `node_modules` and hidden entries are never candidates.
+    /// `apps/*` or `packages/*`) to the directories it matches, confined to
+    /// `root`.
+    ///
+    /// `workspaces` is JSON that ships with the scanned repository, so
+    /// unlike the crate's other traversal (always through
+    /// `ignore::WalkBuilder::new(root)`, which is structurally incapable of
+    /// escaping), plain path joining here has no such guarantee: a literal
+    /// `..` segment (or, in principle, an absolute one) would otherwise
+    /// walk outside the project. Containment is checked after every
+    /// segment, not just at the end, so an escaped intermediate directory
+    /// is never even handed to a later wildcard segment's `read_dir`. A
+    /// candidate that escapes is dropped silently — it is not recorded
+    /// anywhere, because nothing was legitimately skipped: the pattern
+    /// simply does not designate part of this project.
     fn expand_pattern(root: &Path, pattern: &str) -> Vec<PathBuf> {
-        let mut current = vec![root.to_path_buf()];
+        let root = crate::tsconfig::normalise_public(root);
+        let mut current = vec![root.clone()];
         for segment in pattern.split('/').filter(|s| !s.is_empty()) {
             let mut next = Vec::new();
             for base in &current {
@@ -185,7 +198,7 @@ impl TypeScriptExtractor {
                         let Some(name) = entry.file_name().to_str().map(str::to_string) else {
                             continue;
                         };
-                        if name == "node_modules" || name.starts_with('.') {
+                        if Self::is_excluded_workspace_dir(&name) {
                             continue;
                         }
                         if entry.file_type().is_ok_and(|t| t.is_dir())
@@ -194,14 +207,18 @@ impl TypeScriptExtractor {
                             next.push(entry.path());
                         }
                     }
-                } else {
+                } else if !Self::is_excluded_workspace_dir(segment) {
                     let candidate = base.join(segment);
                     if candidate.is_dir() {
                         next.push(candidate);
                     }
                 }
             }
-            current = next;
+            current = next
+                .into_iter()
+                .map(|p| crate::tsconfig::normalise_public(&p))
+                .filter(|p| p.starts_with(&root))
+                .collect();
         }
         current
     }
@@ -216,6 +233,14 @@ impl TypeScriptExtractor {
             }
             None => pattern == name,
         }
+    }
+
+    /// `node_modules`, or an actual hidden directory. Deliberately does
+    /// *not* match `.`/`..`: those are governed by the containment check
+    /// in `expand_pattern`, which stays the single mechanism responsible
+    /// for rejecting path traversal.
+    fn is_excluded_workspace_dir(name: &str) -> bool {
+        name == "node_modules" || (name.starts_with('.') && name != "." && name != "..")
     }
 
     /// A package's best entry-point candidate: its declared
@@ -336,15 +361,33 @@ impl Extractor for TypeScriptExtractor {
         //    as the alias branch above.
         let mut matched_a_workspace_package = false;
         for (name, package) in &self.workspace_packages {
-            let candidate = if raw == name {
+            let is_exact = raw == name;
+            let deep_rest = raw
+                .strip_prefix(name.as_str())
+                .and_then(|rest| rest.strip_prefix('/'));
+            if !is_exact && deep_rest.is_none() {
+                continue; // `raw` has nothing to do with this package.
+            }
+            // The prefix matched syntactically, so this specifier is
+            // committed to naming a local package from here on — a probe
+            // miss below still means Unresolved, never falling through to
+            // rule 4.
+            matched_a_workspace_package = true;
+
+            let candidate = if is_exact {
                 Some(package.entry.clone())
             } else {
-                raw.strip_prefix(name.as_str())
-                    .and_then(|rest| rest.strip_prefix('/'))
-                    .map(|rest| package.dir.join(rest))
+                // A deep import is not a relative import: confine it to
+                // the package directory rather than letting `..` walk out
+                // of it (unlike rule 1, which permits `..` in relative
+                // imports by design). A candidate that escapes is treated
+                // as a miss, not silently probed anyway.
+                deep_rest
+                    .map(|rest| crate::tsconfig::normalise_public(&package.dir.join(rest)))
+                    .filter(|candidate| candidate.starts_with(&package.dir))
             };
+
             if let Some(candidate) = candidate {
-                matched_a_workspace_package = true;
                 if let Some(path) = self.probe(&candidate) {
                     return Resolution::Internal(path);
                 }
@@ -745,5 +788,98 @@ export * from "./barrel";"#,
             e.resolve("react", &dir.path().join("src/a.ts")),
             Resolution::External("react".into())
         );
+    }
+
+    // --- Containment: a `workspaces` pattern cannot walk outside root ---
+
+    #[test]
+    fn a_workspaces_pattern_escaping_the_root_via_dot_dot_is_rejected() {
+        // Outside `project/` (the scanned root) sits a real package with a
+        // real entry point. A `workspaces` pattern that reaches it via
+        // `..` must not register it: the specifier stays External, never
+        // Internal into a location outside the scanned tree.
+        let outer = TempDir::new().unwrap();
+        write(
+            &outer,
+            "project/package.json",
+            r#"{ "workspaces": ["../secret-package"] }"#,
+        );
+        write(
+            &outer,
+            "secret-package/package.json",
+            r#"{ "name": "@evil/pkg" }"#,
+        );
+        write(&outer, "secret-package/index.ts", "");
+        let root = outer.path().join("project");
+        let e = TypeScriptExtractor::new(&root);
+        assert_eq!(
+            e.resolve("@evil/pkg", &root.join("src/a.ts")),
+            Resolution::External("@evil/pkg".into())
+        );
+    }
+
+    #[test]
+    fn an_absolute_workspaces_pattern_is_rejected() {
+        let outer = TempDir::new().unwrap();
+        write(
+            &outer,
+            "secret-package/package.json",
+            r#"{ "name": "@evil/pkg" }"#,
+        );
+        write(&outer, "secret-package/index.ts", "");
+        let secret_dir = outer.path().join("secret-package");
+        write(
+            &outer,
+            "project/package.json",
+            &format!(r#"{{ "workspaces": ["{}"] }}"#, secret_dir.display()),
+        );
+        let root = outer.path().join("project");
+        let e = TypeScriptExtractor::new(&root);
+        assert_eq!(
+            e.resolve("@evil/pkg", &root.join("src/a.ts")),
+            Resolution::External("@evil/pkg".into())
+        );
+    }
+
+    #[test]
+    fn a_workspaces_pattern_matching_inside_node_modules_yields_no_package() {
+        let dir = TempDir::new().unwrap();
+        write(
+            &dir,
+            "package.json",
+            r#"{ "workspaces": ["node_modules/*"] }"#,
+        );
+        write(
+            &dir,
+            "node_modules/evil-pkg/package.json",
+            r#"{ "name": "@evil/pkg" }"#,
+        );
+        write(&dir, "node_modules/evil-pkg/index.ts", "");
+        let e = TypeScriptExtractor::new(dir.path());
+        assert_eq!(
+            e.resolve("@evil/pkg", &dir.path().join("src/a.ts")),
+            Resolution::External("@evil/pkg".into())
+        );
+    }
+
+    #[test]
+    fn a_deep_import_escaping_the_package_directory_does_not_resolve_outside_it() {
+        // `secret.ts` genuinely exists two levels above the package
+        // directory; a naive join would find it. Confinement must refuse
+        // to look there.
+        let dir = TempDir::new().unwrap();
+        write(&dir, "package.json", r#"{ "workspaces": ["packages/*"] }"#);
+        write(
+            &dir,
+            "packages/shared-types/package.json",
+            r#"{ "name": "@mastore/shared-types" }"#,
+        );
+        write(&dir, "secret.ts", "");
+        let e = TypeScriptExtractor::new(dir.path());
+        let got = e.resolve(
+            "@mastore/shared-types/../../secret",
+            &dir.path().join("apps/web/a.ts"),
+        );
+        assert_eq!(got, Resolution::Unresolved);
     }
 }

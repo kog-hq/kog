@@ -1,3 +1,29 @@
+# Rust
+/target/
+**/*.rs.bk
+*.pdb
 
-# SDD scratch workspace
-.superpowers/
+# Test fixtures may be generated from real transcripts — never commit raw ones.
+# Only anonymized, reviewed fixtures belong in the repo, and they go in
+# crates/*/tests/fixtures/ explicitly.
+/fixtures-raw/
+*.jsonl.raw
+
+# Local state and config that must never be shared
+/.dejavu/
+config.local.toml
+
+# Tauri (v2)
+/crates/dejavu-app/target/
+/crates/dejavu-app/dist/
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# macOS
+.DS_Store
+
+# Subagent-driven development scratch (ledger, briefs, review packages)
+/.superpowers/

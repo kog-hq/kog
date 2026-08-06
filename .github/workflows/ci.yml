@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  rust:
+    name: fmt · clippy · test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # The repository is design-first: no Rust code exists yet. Rather than
+      # showing a red badge until the first crate lands, the checks below no-op
+      # until there is a Cargo.toml to check.
+      - name: Probe for a Cargo workspace
+        id: probe
+        run: |
+          if [ -f Cargo.toml ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No Cargo.toml yet — skipping Rust checks."
+          fi
+
+      - name: Install toolchain
+        if: steps.probe.outputs.present == 'true'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache
+        if: steps.probe.outputs.present == 'true'
+        uses: Swatinem/rust-cache@v2
+
+      - name: Formatting
+        if: steps.probe.outputs.present == 'true'
+        run: cargo fmt --all --check
+
+      - name: Lints
+        if: steps.probe.outputs.present == 'true'
+        run: cargo clippy --all-targets --all-features
+
+      - name: Tests
+        if: steps.probe.outputs.present == 'true'
+        run: cargo test --all-features
+
+  secrets:
+    name: no committed secrets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      # This project handles credentials by nature; a leaked fixture would be
+      # the worst possible bug to ship, so the whole history is scanned rather
+      # than a diff.
+      #
+      # gitleaks is invoked directly instead of through gitleaks-action: the
+      # action derives its scan range from the push event, which breaks after
+      # any history rewrite (it resolves <root>^ and aborts). Scanning the full
+      # clone is deterministic and behaves the same on pushes, PRs and forks.
+      - name: Install gitleaks
+        env:
+          GITLEAKS_VERSION: 8.30.1
+        run: |
+          curl -sSfL \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin gitleaks
+          gitleaks version
+
+      - name: Scan full history
+        run: gitleaks git --redact --verbose .

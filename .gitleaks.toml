@@ -1,0 +1,24 @@
+# gitleaks configuration for mycelium.
+#
+# This project exists to strip credentials out of transcripts, so its redaction
+# tests must contain credential-shaped strings to be worth anything. Weakening
+# those fixtures to satisfy the scanner would quietly defeat both the test and
+# the feature behind it — the opposite of what a secret scanner is for.
+#
+# The allowlist is therefore scoped to the two places that legitimately hold
+# fake credential shapes: the planning documents that specify the redaction
+# test vectors, and the redaction module that implements them. Everything else
+# in the repository is scanned with the full default rule set.
+#
+# A real credential must never be placed in these paths. If one ever is, this
+# file is what let it through.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Redaction test vectors — deliberately credential-shaped, never real"
+paths = [
+  '''docs/plans/.*\.md''',
+  '''crates/mycelium-graph/src/redact\.rs''',
+]

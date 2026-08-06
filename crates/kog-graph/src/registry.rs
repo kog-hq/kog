@@ -7,8 +7,9 @@
 
 use crate::extractor::Extractor;
 use crate::extractors::{
-    CLikeExtractor, CssExtractor, GoExtractor, HtmlExtractor, PythonExtractor, RustExtractor,
-    SfcExtractor, ShellExtractor, TypeScriptExtractor,
+    CLikeExtractor, CSharpExtractor, CssExtractor, GoExtractor, HtmlExtractor, JavaExtractor,
+    PhpExtractor, PythonExtractor, RubyExtractor, RustExtractor, SfcExtractor, ShellExtractor,
+    TypeScriptExtractor,
 };
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -82,6 +83,10 @@ impl Registry {
             Box::new(PythonExtractor::new(root)),
             Box::new(RustExtractor::new(root)),
             Box::new(CLikeExtractor::new(root)),
+            Box::new(JavaExtractor::new(root)),
+            Box::new(CSharpExtractor::new(root)),
+            Box::new(RubyExtractor::new(root)),
+            Box::new(PhpExtractor::new(root)),
             Box::new(HtmlExtractor::new(root)),
             Box::new(CssExtractor::new(root)),
             Box::new(ShellExtractor::new(root)),

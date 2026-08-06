@@ -23,7 +23,7 @@
 <br />
 
 > [!NOTE]
-> **v0.1.** Twelve languages, file-level granularity. The graph is a proof of the
+> **v0.1.** Sixteen languages, file-level granularity. The graph is a proof of the
 > pipeline, not an interface yet — no search, no filters, no clustering. What is
 > finished is the part that has to be right: the resolution, the coverage, and the
 > two numbers that report them.
@@ -165,10 +165,11 @@ Full breakdown, with the raw output and every gap categorised, in
 
 Stated plainly, because a tool that only advertises its strengths is not measuring anything.
 
-- **Twelve languages, not all of them.** TypeScript, JavaScript, Vue, Svelte, Astro, Go,
-  Python, Rust, C, C++, HTML, CSS/Sass/Less and shell. Everything else is a node in the
-  graph and a named line in the coverage report — SQL, MDX, Java, Ruby, PHP, C#, Swift,
-  Kotlin — but its own imports are not read. The report says which, and how many.
+- **Sixteen languages, not all of them.** TypeScript, JavaScript, Vue, Svelte, Astro, Go,
+  Python, Rust, C, C++, Java, C#, Ruby, PHP, HTML, CSS/Sass/Less and shell. Everything
+  else is a node in the graph and a named line in the coverage report — SQL, MDX, Swift,
+  Kotlin, Scala, Elixir — but its own imports are not read. The report says which, and
+  how many.
 - **Files, not symbols.** Nodes are files, edges are static imports. Call graphs need a
   type checker to be right, and a wrong call graph is worse than a coarse import graph.
 - **No dynamic `import()`**, no `require()`, no run-time path assembly. A shell `source

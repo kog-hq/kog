@@ -28,10 +28,11 @@ v0 read TypeScript and dropped everything else without saying so. A tool that su
 language and silently ignores the other nine scores a perfect resolution rate on a
 polyglot repository.
 
-- **Twelve languages.** TypeScript, JavaScript, Vue, Svelte, Astro, Go, Python, Rust, C,
-  C++, HTML, CSS/Sass/Less, shell. One `Extractor` implementation each, dispatched by
-  extension through a registry. Go proved the abstraction holds where the node stops being
-  a file: an import names a package, one specifier resolves to a set.
+- **Sixteen languages.** TypeScript, JavaScript, Vue, Svelte, Astro, Go, Python, Rust, C,
+  C++, Java, C#, Ruby, PHP, HTML, CSS/Sass/Less, shell. One `Extractor` implementation
+  each, dispatched by extension through a registry. Go proved the abstraction holds where
+  the node stops being a file: an import names a package, one specifier resolves to a set
+  — and Java's wildcard imports and C#'s namespaces then reused that same shape.
 - **A rate per language.** An aggregate lets a broken resolver hide behind a majority
   language that works — publishing per language immediately turned up two real bugs that
   had moved the repository-wide number by less than a point.
@@ -60,9 +61,8 @@ The gap list is the roadmap now: whatever the coverage report names most often a
 repositories is what gets read next. Ordered by what shows up:
 
 - **SQL** and **MDX** — the two largest gaps on documenso, 306 files between them
-- **Java** and **Kotlin** — an import names a package path, mechanical to resolve
-- **Ruby** (`require_relative`), **PHP** (PSR-4 through `composer.json`), **C#**
-  (namespaces indexed across files)
+- **Kotlin** — the same package-path rule as Java, on a grammar not yet wired in
+- **Scala**, **Elixir**, **Dart**, **Lua**
 - **Swift** — blocked, and honestly so: a Swift file imports no other file in its module,
   so a file-level graph of it is nodes and no edges. It needs symbol granularity, which is
   its own project.

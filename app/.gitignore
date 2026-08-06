@@ -1,4 +1,6 @@
 node_modules
 dist
-public/graph.json
-public/graph-mastore.json
+# Any generated `mycelium scan` output dropped into `public/` for local
+# viewing — filenames are whatever the person running the scan chose, never
+# committed.
+public/graph*.json

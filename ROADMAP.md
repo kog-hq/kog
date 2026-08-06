@@ -19,8 +19,10 @@ asserted.
   line and category — the number is auditable, not just published
 - `kog` in a project directory: scans, serves an embedded page, opens the browser. One binary,
   no JS toolchain, no checkout
-- measured on a 727-file Turborepo monorepo: 3211 internal specifiers, 3160 resolved, 0
-  unresolved, 51 excluded (all non-source artefacts), rate 1.0000
+- measured on two public repositories a reader can clone:
+  [`documenso/documenso`](https://github.com/documenso/documenso) (2,073 files, Turborepo) at
+  rate 0.9778, and [`TanStack/query`](https://github.com/TanStack/query) (1,027 files, Nx/pnpm
+  library monorepo) at rate 0.9946 — every remaining gap on both is categorised by hand
 
 Full evidence and reproduction commands: [`docs/measurements/`](docs/measurements/).
 
@@ -60,10 +62,12 @@ supported language publishes its own rate.
 The point at which KOG becomes useful to an agent rather than only to a person.
 
 An agent asking *"what depends on this file?"* today greps, and grep answers with text matches.
-On the reference monorepo, grepping the path of the most-depended-upon file finds **1** of its
-**232** dependents — because every real import goes through a `@scope/name` alias that grep
-cannot connect to a file. The agent concludes the file is barely used, and is wrong by a factor
-of 232.
+On [`documenso/documenso`](https://github.com/documenso/documenso), `packages/prisma/index.ts`
+is the most-depended-upon file in the graph — **484** real dependents, resolved through the
+`@documenso/prisma` workspace-package alias. Grepping the repository for that file's own path,
+`packages/prisma/index.ts`, finds **0** matches: every one of those 484 imports goes through
+the alias, and grep cannot connect an alias to the file it names. The agent concludes the file
+is unused, and is wrong by all 484.
 
 The graph already knows. It just has no way to be asked. Planned queries:
 

@@ -61,6 +61,35 @@ impl TypeScriptExtractor {
         }
     }
 
+    /// Strip a Vite-style resource-query suffix (`?url`, `?raw`, …) or
+    /// fragment (`#…`) from a specifier before it is ever probed against the
+    /// filesystem. Vite treats everything from the first `?` as an import
+    /// *modifier*, not part of the path: `./app.css?url` asks Vite to inline
+    /// the file's resolved URL, but the file on disk is still named
+    /// `app.css`. `probe` searches for a file literally named `app.css?url`
+    /// and fails — found on documenso's `apps/remix/app/root.tsx`.
+    ///
+    /// A `#` only starts a fragment from the second character onward: a
+    /// leading `#` names a Node.js subpath import (`#internal/utils`, the
+    /// package.json `imports` field), part of the specifier's identity, not
+    /// a suffix to drop.
+    ///
+    /// Called once, centrally, from the top of [`Self::resolve`] — before
+    /// any resolution rule runs — so every rule benefits, not just relative
+    /// imports: on documenso this also fires through a tsconfig alias
+    /// (`~/app.css?url` via `"~/*": ["./app/*"]`, in
+    /// `apps/remix/app/routes/_internal+/[__htmltopdf]+/audit-log.tsx`), and
+    /// would equally apply to a workspace-package or external specifier
+    /// carrying the same suffix.
+    fn strip_query_suffix(raw: &str) -> &str {
+        for (i, b) in raw.bytes().enumerate() {
+            if b == b'?' || (b == b'#' && i > 0) {
+                return &raw[..i];
+            }
+        }
+        raw
+    }
+
     /// Probe a resolution candidate: exact file, then each extension,
     /// then the directory's index file. Never touches `self` — an
     /// associated function rather than a method so `entry_point` can call
@@ -71,16 +100,26 @@ impl TypeScriptExtractor {
         }
 
         // `./b.js` is written by ESM/NodeNext style but `./b.ts` is on disk.
-        if let Some(stem) = candidate
-            .extension()
-            .and_then(|e| e.to_str())
-            .filter(|e| matches!(*e, "js" | "jsx" | "mjs" | "cjs"))
-            .map(|_| candidate.with_extension(""))
-        {
-            for ext in EXTENSION_ORDER {
-                let probed = stem.with_extension(ext);
-                if probed.is_file() {
-                    return Some(probed);
+        // The matched suffix (`.js`/`.jsx`/`.mjs`/`.cjs`) must be trimmed by
+        // its exact byte length, not via a second `Path::with_extension`
+        // call: for a double extension like `containers.svelte.js` (the
+        // Svelte 5 runes-file convention — found on TanStack Query's
+        // `packages/svelte-query`, e.g. `createBaseQuery.svelte.ts`
+        // importing `./containers.svelte.js`, on disk as
+        // `containers.svelte.ts`), stripping `.js` leaves `containers.svelte`,
+        // whose own `.extension()` is `svelte` — a second `with_extension`
+        // would then replace `.svelte` too, landing on `containers.ts`
+        // instead of `containers.svelte.ts`.
+        if let Some(orig_ext) = candidate.extension().and_then(|e| e.to_str()) {
+            if matches!(orig_ext, "js" | "jsx" | "mjs" | "cjs") {
+                if let Some(full) = candidate.to_str() {
+                    let base = &full[..full.len() - orig_ext.len() - 1];
+                    for ext in EXTENSION_ORDER {
+                        let probed = PathBuf::from(format!("{base}.{ext}"));
+                        if probed.is_file() {
+                            return Some(probed);
+                        }
+                    }
                 }
             }
         }
@@ -115,7 +154,7 @@ impl TypeScriptExtractor {
                 let target_str = target.to_str()?;
                 Some(PathBuf::from(target_str.replace('*', rest)))
             }
-            // Exact mapping: `@mastore/shared-types` -> one file.
+            // Exact mapping: `@acme/shared-types` -> one file.
             None if pattern == raw => Some(target.to_path_buf()),
             None => None,
         }
@@ -264,7 +303,7 @@ impl TypeScriptExtractor {
     /// KOG graphs source, not build output — the original design
     /// ("resolved to its `main`/`exports`, else `index.ts`") is correct for
     /// a runtime resolver but wrong here: on the acceptance target,
-    /// `@mastore/shared-types` declares `main` and `exports["."].import`
+    /// `@acme/shared-types` declares `main` and `exports["."].import`
     /// both pointing at a gitignored `dist/index.js`, while
     /// `exports["."].types` (and the older top-level `types`) point at the
     /// real TypeScript source. Following `exports`/`main` literally landed
@@ -407,6 +446,11 @@ impl Extractor for TypeScriptExtractor {
     }
 
     fn resolve(&self, raw: &str, importer: &Path) -> Resolution {
+        // Applied once, before any rule below, so every rule benefits — see
+        // `strip_query_suffix`'s doc comment for why this can't live inside
+        // rule 1 alone.
+        let raw = Self::strip_query_suffix(raw);
+
         // 1. Relative.
         if raw.starts_with('.') {
             let base = match importer.parent() {
@@ -622,6 +666,103 @@ export * from "./barrel";"#,
     }
 
     #[test]
+    fn a_double_extension_js_specifier_falls_back_to_its_ts_sibling() {
+        // Svelte 5 runes files are named `foo.svelte.ts` and imported with
+        // an explicit `.svelte.js` specifier — found on TanStack Query's
+        // `packages/svelte-query` (`createBaseQuery.svelte.ts` imports
+        // `./containers.svelte.js`, and the file on disk is
+        // `containers.svelte.ts`). `Path::with_extension` treats `.svelte`
+        // as the stripped candidate's own extension and replaces it,
+        // landing on `containers.ts` instead of `containers.svelte.ts`.
+        let dir = TempDir::new().unwrap();
+        write(&dir, "src/a.ts", "");
+        write(&dir, "src/containers.svelte.ts", "");
+        let e = TypeScriptExtractor::new(dir.path());
+        let got = e.resolve("./containers.svelte.js", &dir.path().join("src/a.ts"));
+        assert_eq!(
+            got,
+            Resolution::Internal(dir.path().join("src/containers.svelte.ts"))
+        );
+    }
+
+    // --- Vite-style query/fragment suffix (public-repo finding: documenso) ---
+
+    #[test]
+    fn a_vite_url_query_suffix_is_stripped_before_probing() {
+        // `./app.css?url` asks Vite to inline the file's resolved URL; the
+        // file on disk is still named `app.css`. Found on documenso
+        // (`apps/remix/app/root.tsx`), where the unstripped specifier
+        // probed for a file literally named `app.css?url` and failed.
+        let dir = TempDir::new().unwrap();
+        write(&dir, "src/a.tsx", "");
+        write(&dir, "src/app.css", "");
+        let e = TypeScriptExtractor::new(dir.path());
+        let got = e.resolve("./app.css?url", &dir.path().join("src/a.tsx"));
+        assert_eq!(got, Resolution::Internal(dir.path().join("src/app.css")));
+    }
+
+    #[test]
+    fn a_vite_raw_query_suffix_is_stripped_too() {
+        // Same modifier class, different value: `?raw` imports the file's
+        // text content. Any `?…` suffix is a Vite import modifier, not part
+        // of the path, regardless of which word follows the `?`.
+        let dir = TempDir::new().unwrap();
+        write(&dir, "src/a.ts", "");
+        write(&dir, "src/mod.ts", "");
+        let e = TypeScriptExtractor::new(dir.path());
+        let got = e.resolve("./mod.ts?raw", &dir.path().join("src/a.ts"));
+        assert_eq!(got, Resolution::Internal(dir.path().join("src/mod.ts")));
+    }
+
+    #[test]
+    fn a_specifier_with_no_query_is_left_untouched() {
+        assert_eq!(TypeScriptExtractor::strip_query_suffix("./b"), "./b");
+        assert_eq!(
+            TypeScriptExtractor::strip_query_suffix("@tanstack/react-query"),
+            "@tanstack/react-query"
+        );
+    }
+
+    #[test]
+    fn a_fragment_suffix_is_also_stripped() {
+        assert_eq!(
+            TypeScriptExtractor::strip_query_suffix("./worker.ts#worker"),
+            "./worker.ts"
+        );
+    }
+
+    #[test]
+    fn a_leading_hash_is_kept_it_names_a_node_subpath_import() {
+        // `#internal/utils` (Node.js subpath imports, package.json `imports`
+        // field) starts with `#` — that is not a fragment to strip, it is
+        // the specifier's first character and part of its identity.
+        assert_eq!(
+            TypeScriptExtractor::strip_query_suffix("#internal/utils"),
+            "#internal/utils"
+        );
+    }
+
+    #[test]
+    fn a_query_suffix_is_stripped_before_a_tsconfig_alias_too() {
+        // Not just relative imports: documenso's `apps/remix/app/routes/…`
+        // hits this exact shape, `~/app.css?url` through a `"~/*":
+        // ["./app/*"]` mapping — proving the strip has to happen centrally,
+        // before every resolution rule, not bolted onto rule 1 alone.
+        let dir = TempDir::new().unwrap();
+        write(
+            &dir,
+            "tsconfig.json",
+            r#"{ "compilerOptions": { "paths": { "~/*": ["./app/*"] } } }"#,
+        );
+        write(&dir, "app/routes/a.tsx", "");
+        write(&dir, "app/app.css", "");
+        let e = TypeScriptExtractor::new(dir.path());
+        let root = canonical(&dir);
+        let got = e.resolve("~/app.css?url", &root.join("app/routes/a.tsx"));
+        assert_eq!(got, Resolution::Internal(root.join("app/app.css")));
+    }
+
+    #[test]
     fn a_wildcard_alias_resolves_through_tsconfig() {
         let dir = TempDir::new().unwrap();
         write(
@@ -644,14 +785,14 @@ export * from "./barrel";"#,
             &dir,
             "tsconfig.json",
             r#"{ "compilerOptions": { "paths": {
-                "@mastore/shared-types": ["./packages/shared-types/src/index.ts"]
+                "@acme/shared-types": ["./packages/shared-types/src/index.ts"]
             } } }"#,
         );
         write(&dir, "packages/shared-types/src/index.ts", "");
         write(&dir, "apps/web/a.ts", "");
         let e = TypeScriptExtractor::new(dir.path());
         let root = canonical(&dir);
-        let got = e.resolve("@mastore/shared-types", &root.join("apps/web/a.ts"));
+        let got = e.resolve("@acme/shared-types", &root.join("apps/web/a.ts"));
         assert_eq!(
             got,
             Resolution::Internal(root.join("packages/shared-types/src/index.ts"))
@@ -778,12 +919,12 @@ export * from "./barrel";"#,
         write(
             &dir,
             "packages/shared-types/package.json",
-            r#"{ "name": "@mastore/shared-types", "main": "./src/index.ts" }"#,
+            r#"{ "name": "@acme/shared-types", "main": "./src/index.ts" }"#,
         );
         write(&dir, "packages/shared-types/src/index.ts", "");
         let e = TypeScriptExtractor::new(dir.path());
         let root = canonical(&dir);
-        let got = e.resolve("@mastore/shared-types", &root.join("apps/web/a.ts"));
+        let got = e.resolve("@acme/shared-types", &root.join("apps/web/a.ts"));
         assert_eq!(
             got,
             Resolution::Internal(root.join("packages/shared-types/src/index.ts"))
@@ -803,7 +944,7 @@ export * from "./barrel";"#,
             &dir,
             "packages/shared-types/package.json",
             r#"{
-                "name": "@mastore/shared-types",
+                "name": "@acme/shared-types",
                 "main": "./dist/index.js",
                 "exports": { ".": {
                     "types": "./src/index.ts",
@@ -816,7 +957,7 @@ export * from "./barrel";"#,
         write(&dir, "packages/shared-types/dist/index.js", "");
         let e = TypeScriptExtractor::new(dir.path());
         let root = canonical(&dir);
-        let got = e.resolve("@mastore/shared-types", &root.join("apps/backend/a.ts"));
+        let got = e.resolve("@acme/shared-types", &root.join("apps/backend/a.ts"));
         assert_eq!(
             got,
             Resolution::Internal(root.join("packages/shared-types/src/index.ts"))
@@ -833,7 +974,7 @@ export * from "./barrel";"#,
             &dir,
             "packages/shared-types/package.json",
             r#"{
-                "name": "@mastore/shared-types",
+                "name": "@acme/shared-types",
                 "main": "./dist/index.js",
                 "types": "./src/index.ts"
             }"#,
@@ -842,7 +983,7 @@ export * from "./barrel";"#,
         write(&dir, "packages/shared-types/dist/index.js", "");
         let e = TypeScriptExtractor::new(dir.path());
         let root = canonical(&dir);
-        let got = e.resolve("@mastore/shared-types", &root.join("apps/backend/a.ts"));
+        let got = e.resolve("@acme/shared-types", &root.join("apps/backend/a.ts"));
         assert_eq!(
             got,
             Resolution::Internal(root.join("packages/shared-types/src/index.ts"))
@@ -856,12 +997,12 @@ export * from "./barrel";"#,
         write(
             &dir,
             "packages/shared-types/package.json",
-            r#"{ "name": "@mastore/shared-types" }"#,
+            r#"{ "name": "@acme/shared-types" }"#,
         );
         write(&dir, "packages/shared-types/utils.ts", "");
         let e = TypeScriptExtractor::new(dir.path());
         let root = canonical(&dir);
-        let got = e.resolve("@mastore/shared-types/utils", &root.join("apps/web/a.ts"));
+        let got = e.resolve("@acme/shared-types/utils", &root.join("apps/web/a.ts"));
         assert_eq!(
             got,
             Resolution::Internal(root.join("packages/shared-types/utils.ts"))
@@ -875,12 +1016,12 @@ export * from "./barrel";"#,
         write(
             &dir,
             "packages/shared-types/package.json",
-            r#"{ "name": "@mastore/shared-types" }"#,
+            r#"{ "name": "@acme/shared-types" }"#,
         );
         write(&dir, "packages/shared-types/index.ts", "");
         let e = TypeScriptExtractor::new(dir.path());
         let root = canonical(&dir);
-        let got = e.resolve("@mastore/shared-types", &root.join("apps/web/a.ts"));
+        let got = e.resolve("@acme/shared-types", &root.join("apps/web/a.ts"));
         assert_eq!(
             got,
             Resolution::Internal(root.join("packages/shared-types/index.ts"))
@@ -896,11 +1037,11 @@ export * from "./barrel";"#,
         write(
             &dir,
             "packages/shared-types/package.json",
-            r#"{ "name": "@mastore/shared-types", "main": "./dist/index.js" }"#,
+            r#"{ "name": "@acme/shared-types", "main": "./dist/index.js" }"#,
         );
         let e = TypeScriptExtractor::new(dir.path());
         assert_eq!(
-            e.resolve("@mastore/shared-types", &dir.path().join("apps/web/a.ts")),
+            e.resolve("@acme/shared-types", &dir.path().join("apps/web/a.ts")),
             Resolution::Unresolved
         );
     }
@@ -912,7 +1053,7 @@ export * from "./barrel";"#,
         write(
             &dir,
             "packages/shared-types/package.json",
-            r#"{ "name": "@mastore/shared-types" }"#,
+            r#"{ "name": "@acme/shared-types" }"#,
         );
         let e = TypeScriptExtractor::new(dir.path());
         assert_eq!(
@@ -924,7 +1065,7 @@ export * from "./barrel";"#,
     #[test]
     fn a_tsconfig_alias_wins_over_a_workspace_package_when_both_cover_the_specifier() {
         // On the acceptance target, cross-package imports like
-        // `@mastore/shared-types` are covered by *both* a tsconfig alias
+        // `@acme/shared-types` are covered by *both* a tsconfig alias
         // and a workspace package; rule 2 (alias) must keep winning over
         // rule 3 (workspace package) — this is the ordering guarantee the
         // acceptance target depends on.
@@ -933,7 +1074,7 @@ export * from "./barrel";"#,
             &dir,
             "tsconfig.json",
             r#"{ "compilerOptions": { "paths": {
-                "@mastore/shared-types": ["./packages/shared-types/src/index.ts"]
+                "@acme/shared-types": ["./packages/shared-types/src/index.ts"]
             } } }"#,
         );
         write(&dir, "packages/shared-types/src/index.ts", "");
@@ -941,12 +1082,12 @@ export * from "./barrel";"#,
         write(
             &dir,
             "packages/shared-types/package.json",
-            r#"{ "name": "@mastore/shared-types", "main": "./dist/index.js" }"#,
+            r#"{ "name": "@acme/shared-types", "main": "./dist/index.js" }"#,
         );
         write(&dir, "packages/shared-types/dist/index.js", "");
         let e = TypeScriptExtractor::new(dir.path());
         let root = canonical(&dir);
-        let got = e.resolve("@mastore/shared-types", &root.join("apps/web/a.ts"));
+        let got = e.resolve("@acme/shared-types", &root.join("apps/web/a.ts"));
         // The tsconfig alias target, not the workspace package's `main`.
         assert_eq!(
             got,
@@ -966,12 +1107,12 @@ export * from "./barrel";"#,
         write(
             &dir,
             "packages/shared-types/package.json",
-            r#"{ "name": "@mastore/shared-types" }"#,
+            r#"{ "name": "@acme/shared-types" }"#,
         );
         write(&dir, "packages/shared-types/index.ts", "");
         let e = TypeScriptExtractor::new(dir.path());
         let root = canonical(&dir);
-        let got = e.resolve("@mastore/shared-types", &root.join("apps/web/a.ts"));
+        let got = e.resolve("@acme/shared-types", &root.join("apps/web/a.ts"));
         assert_eq!(
             got,
             Resolution::Internal(root.join("packages/shared-types/index.ts"))
@@ -1083,12 +1224,12 @@ export * from "./barrel";"#,
         write(
             &dir,
             "packages/shared-types/package.json",
-            r#"{ "name": "@mastore/shared-types" }"#,
+            r#"{ "name": "@acme/shared-types" }"#,
         );
         write(&dir, "secret.ts", "");
         let e = TypeScriptExtractor::new(dir.path());
         let got = e.resolve(
-            "@mastore/shared-types/../../secret",
+            "@acme/shared-types/../../secret",
             &dir.path().join("apps/web/a.ts"),
         );
         assert_eq!(got, Resolution::Unresolved);

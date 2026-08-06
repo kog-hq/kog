@@ -40,7 +40,7 @@ sigma 3.0.3 · graphology 0.26.0
 | Role | Path | Volume |
 | --- | --- | --- |
 | Quick fixture | `~/apps/lueur` | 93 files, `@/*` alias |
-| Acceptance target | `~/Mastore/mastore-saas` | 727 files, Turborepo monorepo |
+| Acceptance target | `~/reference-monorepo` | 727 files, Turborepo monorepo |
 
 ---
 
@@ -675,12 +675,12 @@ mod tests {
             &dir,
             "tsconfig.json",
             r#"{ "compilerOptions": { "paths": {
-                "@mastore/shared-types": ["./packages/shared-types/src/index.ts"]
+                "@acme/shared-types": ["./packages/shared-types/src/index.ts"]
             } } }"#,
         );
         let index = TsConfigIndex::build(dir.path());
         let mappings = index.mappings_for(&dir.path().join("a.ts"));
-        assert_eq!(mappings[0].pattern, "@mastore/shared-types");
+        assert_eq!(mappings[0].pattern, "@acme/shared-types");
         assert!(!mappings[0].pattern.contains('*'));
     }
 
@@ -745,7 +745,7 @@ struct RawTsConfig {
 /// One `paths` entry, with its targets already made absolute.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PathMapping {
-    /// The alias as written, e.g. `@common/*` or `@mastore/shared-types`.
+    /// The alias as written, e.g. `@common/*` or `@acme/shared-types`.
     pub pattern: String,
     /// Absolute targets. A `*` inside is a placeholder, kept verbatim.
     pub targets: Vec<PathBuf>,
@@ -908,7 +908,7 @@ mod real_project_tests {
     #[test]
     #[ignore]
     fn the_reference_monorepo_exposes_its_aliases() {
-        let root = Path::new(env!("HOME")).join("Mastore/mastore-saas");
+        let root = Path::new(env!("HOME")).join("reference-monorepo");
         if !root.exists() {
             eprintln!("reference checkout missing, skipping");
             return;
@@ -1267,13 +1267,13 @@ export * from "./barrel";"#);
             &dir,
             "tsconfig.json",
             r#"{ "compilerOptions": { "paths": {
-                "@mastore/shared-types": ["./packages/shared-types/src/index.ts"]
+                "@acme/shared-types": ["./packages/shared-types/src/index.ts"]
             } } }"#,
         );
         write(&dir, "packages/shared-types/src/index.ts", "");
         write(&dir, "apps/web/a.ts", "");
         let e = TypeScriptExtractor::new(dir.path());
-        let got = e.resolve("@mastore/shared-types", &dir.path().join("apps/web/a.ts"));
+        let got = e.resolve("@acme/shared-types", &dir.path().join("apps/web/a.ts"));
         assert_eq!(
             got,
             Resolution::Internal(dir.path().join("packages/shared-types/src/index.ts"))
@@ -1440,7 +1440,7 @@ impl TypeScriptExtractor {
                 let target_str = target.to_str()?;
                 Some(PathBuf::from(target_str.replace('*', rest)))
             }
-            // Exact mapping: `@mastore/shared-types` -> one file.
+            // Exact mapping: `@acme/shared-types` -> one file.
             None if pattern == raw => Some(target.to_path_buf()),
             None => None,
         }
@@ -2131,7 +2131,7 @@ git add -A && git commit -m "feat(app): render the graph with sigma"
 cd ~/apps/mycelium
 export PATH="$HOME/.cargo/bin:$PATH"
 cargo build --release -q
-time ./target/release/kog scan ~/Mastore/mastore-saas -o /tmp/saas-graph.json
+time ./target/release/kog scan ~/reference-monorepo -o /tmp/saas-graph.json
 ```
 
 Record: `files discovered`, `resolution rate`, `nodes`, `edges`, duration.
@@ -2148,7 +2148,7 @@ jq -e '.stats.resolution_rate >= 0.95' /tmp/saas-graph.json >/dev/null \
 and categorize them before any fix:
 
 ```bash
-./target/release/kog scan ~/Mastore/mastore-saas --stats-only 2>&1 | tail -20
+./target/release/kog scan ~/reference-monorepo --stats-only 2>&1 | tail -20
 ```
 
 Expected causes, in order of likelihood: an alias not picked up in the `extends`

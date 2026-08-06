@@ -123,7 +123,7 @@ Breakdown of the 4,355 `from '…'` specifiers in the reference project:
 
 | Category | Count |
 | --- | ---: |
-| Internal aliases (`@/` `@common/` `@modules/` `@mastore/` `@lib/`) | 2,651 |
+| Internal aliases (`@/` `@common/` `@modules/` `@scope/` `@lib/`) | 2,651 |
 | Relative (`./` `../`) | 558 |
 | **Total internal** | **3,209** (73.7 %) |
 | External (`@nestjs` 282, `react` 261, `lucide-react` 196, `next` 98, `@tanstack` 41…) | 1,146 |
@@ -133,9 +133,10 @@ These 1,146 external specifiers spread across **77 distinct packages**.
 A resolver that ignores tsconfig `paths` loses **82.6 % of internal edges**. Reading
 tsconfig is therefore not a side option, it's the core of the parser.
 
-The reference project is moreover a Turborepo monorepo: `workspaces: ["apps/*",
-"packages/*"]`, a root `tsconfig.base.json` and five nested tsconfigs, with
-`@mastore/*` imports between packages. It's the hardest case, so it's the right test bench.
+The reference project is moreover a private 727-file Turborepo monorepo:
+`workspaces: ["apps/*", "packages/*"]`, a root `tsconfig.base.json` and five
+nested tsconfigs, with cross-package `@scope/*` imports between packages. It's
+the hardest case, so it's the right test bench.
 
 ### 3.5 External dependencies: ignored, but counted
 

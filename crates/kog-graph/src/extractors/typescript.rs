@@ -407,8 +407,25 @@ impl Extractor for TypeScriptExtractor {
         "typescript"
     }
 
+    /// One extractor, two languages. TypeScript and JavaScript share an
+    /// import syntax and a resolver — including the `.js`-specifier-names-a
+    /// `.ts`-file rule that makes a single grammar the right choice — but a
+    /// `.js` file is not a TypeScript file, and per-language statistics that
+    /// said so would report every JavaScript project as a TypeScript one.
+    fn lang_for(&self, path: &Path) -> &'static str {
+        let extension = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        match extension.as_str() {
+            "js" | "jsx" | "mjs" | "cjs" => "javascript",
+            _ => "typescript",
+        }
+    }
+
     fn extensions(&self) -> &'static [&'static str] {
-        &["ts", "tsx", "js", "jsx", "mts", "cts"]
+        &["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"]
     }
 
     fn extract(&self, source: &str) -> Result<Vec<Specifier>, ExtractError> {
@@ -536,6 +553,33 @@ impl Extractor for TypeScriptExtractor {
 
     fn skipped_configs(&self) -> &[SkippedConfig] {
         self.tsconfig.skipped()
+    }
+}
+
+/// A shared TypeScript extractor.
+///
+/// Two front ends need the same one: TypeScript itself, and the single-file
+/// component extractor that delegates every resolution to it. Building two
+/// would walk the project twice for `tsconfig` files and workspace packages,
+/// and leave two indexes free to drift apart.
+impl Extractor for std::sync::Arc<TypeScriptExtractor> {
+    fn lang(&self) -> &'static str {
+        (**self).lang()
+    }
+    fn lang_for(&self, path: &Path) -> &'static str {
+        (**self).lang_for(path)
+    }
+    fn extensions(&self) -> &'static [&'static str] {
+        (**self).extensions()
+    }
+    fn extract(&self, source: &str) -> Result<Vec<Specifier>, ExtractError> {
+        (**self).extract(source)
+    }
+    fn resolve(&self, raw: &str, importer: &Path) -> Resolution {
+        (**self).resolve(raw, importer)
+    }
+    fn skipped_configs(&self) -> &[SkippedConfig] {
+        (**self).skipped_configs()
     }
 }
 
@@ -907,7 +951,25 @@ export * from "./barrel";"#,
         let dir = TempDir::new().unwrap();
         let e = TypeScriptExtractor::new(dir.path());
         assert_eq!(e.lang(), "typescript");
-        assert_eq!(e.extensions(), &["ts", "tsx", "js", "jsx", "mts", "cts"]);
+        assert_eq!(
+            e.extensions(),
+            &["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"]
+        );
+    }
+
+    /// One grammar, one resolver, two languages: a `.js` file must be
+    /// labelled JavaScript or every JavaScript project in the per-language
+    /// table reads as a TypeScript one.
+    #[test]
+    fn javascript_files_are_labelled_javascript_not_typescript() {
+        let dir = TempDir::new().unwrap();
+        let e = TypeScriptExtractor::new(dir.path());
+        assert_eq!(e.lang_for(Path::new("src/a.ts")), "typescript");
+        assert_eq!(e.lang_for(Path::new("src/a.tsx")), "typescript");
+        assert_eq!(e.lang_for(Path::new("src/a.js")), "javascript");
+        assert_eq!(e.lang_for(Path::new("src/a.jsx")), "javascript");
+        assert_eq!(e.lang_for(Path::new("src/a.mjs")), "javascript");
+        assert_eq!(e.lang_for(Path::new("src/a.cjs")), "javascript");
     }
 
     // --- Resolution rule 3: workspace packages (design doc §6) ---

@@ -15,10 +15,33 @@ pub struct Specifier {
 pub enum Resolution {
     /// A file inside the scanned project. Path is absolute.
     Internal(PathBuf),
+    /// Several files inside the project, all named by one specifier.
+    ///
+    /// Not every language's import names a file. Go imports a *package* —
+    /// a directory of files, any of which may hold the symbol being used —
+    /// and C# imports a namespace, which can be declared across many files.
+    /// One specifier, one resolution, many edges: the specifier counts once
+    /// towards the rate, and the graph gains an edge per target that is a
+    /// node. Paths are absolute.
+    InternalSet(Vec<PathBuf>),
     /// A third-party package. Recorded on the node, never an edge.
     External(String),
     /// Looks internal but no file was found. Counted, never dropped silently.
     Unresolved,
+}
+
+impl Resolution {
+    /// Every internal target, as a slice-like vector: one for
+    /// [`Resolution::Internal`], all of them for [`Resolution::InternalSet`],
+    /// none for the other two. Lets the graph assembler treat both internal
+    /// shapes through one code path.
+    pub fn targets(&self) -> &[PathBuf] {
+        match self {
+            Resolution::Internal(path) => std::slice::from_ref(path),
+            Resolution::InternalSet(paths) => paths,
+            _ => &[],
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -33,9 +56,20 @@ pub enum ExtractError {
 ///
 /// A language ships only once it passes its own resolution gate — see the design
 /// document, section 3.3.
-pub trait Extractor {
+pub trait Extractor: Send + Sync {
     /// Stable language identifier, written into `Node::lang`.
     fn lang(&self) -> &'static str;
+
+    /// The language label for one particular file.
+    ///
+    /// Defaults to [`Extractor::lang`]. Overridden by extractors that cover
+    /// more than one language with one grammar: TypeScript and JavaScript
+    /// share an import syntax and a resolver, but a `.js` file is not a
+    /// TypeScript file, and per-language statistics that said so would be
+    /// wrong.
+    fn lang_for(&self, _path: &Path) -> &'static str {
+        self.lang()
+    }
 
     /// File extensions this extractor claims, without the leading dot.
     fn extensions(&self) -> &'static [&'static str];
@@ -101,6 +135,11 @@ mod tests {
     }
 
     #[test]
+    fn the_per_file_language_defaults_to_the_extractors_own() {
+        assert_eq!(StubExtractor.lang_for(Path::new("a.stub")), "stub");
+    }
+
+    #[test]
     fn extraction_carries_the_line_number() {
         let specs = StubExtractor.extract("./a\n./b").unwrap();
         assert_eq!(specs.len(), 2);
@@ -119,5 +158,15 @@ mod tests {
     fn a_boxed_extractor_stays_usable() {
         let boxed: Box<dyn Extractor> = Box::new(StubExtractor);
         assert_eq!(boxed.lang(), "stub");
+    }
+
+    #[test]
+    fn both_internal_shapes_expose_their_targets_the_same_way() {
+        let one = Resolution::Internal(PathBuf::from("/a.go"));
+        let many = Resolution::InternalSet(vec![PathBuf::from("/a.go"), PathBuf::from("/b.go")]);
+        assert_eq!(one.targets().len(), 1);
+        assert_eq!(many.targets().len(), 2);
+        assert!(Resolution::External("fmt".into()).targets().is_empty());
+        assert!(Resolution::Unresolved.targets().is_empty());
     }
 }

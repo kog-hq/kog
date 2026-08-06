@@ -11,5 +11,7 @@ pub use discover::{build_walker, discover};
 pub use extractor::{ExtractError, Extractor, Resolution, Specifier};
 pub use extractors::TypeScriptExtractor;
 pub use graph::build_graph;
-pub use model::{Edge, EdgeKind, Failure, Graph, Node, Stats};
+pub use model::{
+    Diagnostic, DiagnosticKind, Edge, EdgeKind, Failure, Graph, Node, Stats, MAX_DIAGNOSTICS,
+};
 pub use tsconfig::{PathMapping, SkippedConfig, TsConfigIndex};

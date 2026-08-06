@@ -41,6 +41,17 @@ pub struct TypeScriptExtractor {
 
 impl TypeScriptExtractor {
     pub fn new(root: &Path) -> Self {
+        // `build_graph` canonicalises its own root before computing node ids
+        // (mirroring `discover`'s internal canonicalisation), so this must
+        // canonicalise the same way: every absolute path this extractor
+        // hands back (alias targets, workspace-package entries) has to carry
+        // the same canonical prefix, or `node_id`'s `strip_prefix` silently
+        // fails and a genuinely resolved import is miscounted. Falls back to
+        // the given path if canonicalisation fails (e.g. the root does not
+        // exist yet) rather than panicking; downstream resolution then
+        // simply finds nothing, same as today.
+        let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+        let root = root.as_path();
         Self {
             tsconfig: TsConfigIndex::build(root),
             workspace_packages: Self::discover_workspace_packages(root),
@@ -418,6 +429,18 @@ mod tests {
         fs::write(path, body).unwrap();
     }
 
+    /// `TypeScriptExtractor::new` canonicalises its root internally (fix
+    /// round 1, finding 1), so any test that asserts an absolute
+    /// `Resolution::Internal` path, or builds an `importer` that must match
+    /// a tsconfig-alias scope via `mappings_for`'s prefix check, needs to
+    /// work in those same canonical terms. `dir.path()` alone is not
+    /// guaranteed to be canonical — on macOS `/var` symlinks to
+    /// `/private/var`, and every `TempDir` inherits that — so tests that
+    /// compare against or build on top of a resolved path use this instead.
+    fn canonical(dir: &TempDir) -> PathBuf {
+        dir.path().canonicalize().unwrap()
+    }
+
     fn raws(source: &str) -> Vec<String> {
         let dir = TempDir::new().unwrap();
         TypeScriptExtractor::new(dir.path())
@@ -531,8 +554,9 @@ export * from "./barrel";"#,
         write(&dir, "src/lib/api.ts", "");
         write(&dir, "src/app/page.tsx", "");
         let e = TypeScriptExtractor::new(dir.path());
-        let got = e.resolve("@/lib/api", &dir.path().join("src/app/page.tsx"));
-        assert_eq!(got, Resolution::Internal(dir.path().join("src/lib/api.ts")));
+        let root = canonical(&dir);
+        let got = e.resolve("@/lib/api", &root.join("src/app/page.tsx"));
+        assert_eq!(got, Resolution::Internal(root.join("src/lib/api.ts")));
     }
 
     #[test]
@@ -548,10 +572,11 @@ export * from "./barrel";"#,
         write(&dir, "packages/shared-types/src/index.ts", "");
         write(&dir, "apps/web/a.ts", "");
         let e = TypeScriptExtractor::new(dir.path());
-        let got = e.resolve("@mastore/shared-types", &dir.path().join("apps/web/a.ts"));
+        let root = canonical(&dir);
+        let got = e.resolve("@mastore/shared-types", &root.join("apps/web/a.ts"));
         assert_eq!(
             got,
-            Resolution::Internal(dir.path().join("packages/shared-types/src/index.ts"))
+            Resolution::Internal(root.join("packages/shared-types/src/index.ts"))
         );
     }
 
@@ -583,8 +608,14 @@ export * from "./barrel";"#,
         );
         write(&dir, "src/a.ts", "");
         let e = TypeScriptExtractor::new(dir.path());
+        // `importer` must be canonical too: `mappings_for` matches it
+        // against the (now canonical) tsconfig scope via `starts_with`, and
+        // a non-canonical importer would simply miss the scope entirely
+        // rather than exercise the "alias matched, target missing" case
+        // this test is actually about.
+        let root = canonical(&dir);
         assert_eq!(
-            e.resolve("@prisma/generated", &dir.path().join("src/a.ts")),
+            e.resolve("@prisma/generated", &root.join("src/a.ts")),
             Resolution::Unresolved
         );
     }
@@ -632,10 +663,11 @@ export * from "./barrel";"#,
         );
         write(&dir, "packages/shared-types/src/index.ts", "");
         let e = TypeScriptExtractor::new(dir.path());
-        let got = e.resolve("@mastore/shared-types", &dir.path().join("apps/web/a.ts"));
+        let root = canonical(&dir);
+        let got = e.resolve("@mastore/shared-types", &root.join("apps/web/a.ts"));
         assert_eq!(
             got,
-            Resolution::Internal(dir.path().join("packages/shared-types/src/index.ts"))
+            Resolution::Internal(root.join("packages/shared-types/src/index.ts"))
         );
     }
 
@@ -650,13 +682,11 @@ export * from "./barrel";"#,
         );
         write(&dir, "packages/shared-types/utils.ts", "");
         let e = TypeScriptExtractor::new(dir.path());
-        let got = e.resolve(
-            "@mastore/shared-types/utils",
-            &dir.path().join("apps/web/a.ts"),
-        );
+        let root = canonical(&dir);
+        let got = e.resolve("@mastore/shared-types/utils", &root.join("apps/web/a.ts"));
         assert_eq!(
             got,
-            Resolution::Internal(dir.path().join("packages/shared-types/utils.ts"))
+            Resolution::Internal(root.join("packages/shared-types/utils.ts"))
         );
     }
 
@@ -671,10 +701,11 @@ export * from "./barrel";"#,
         );
         write(&dir, "packages/shared-types/index.ts", "");
         let e = TypeScriptExtractor::new(dir.path());
-        let got = e.resolve("@mastore/shared-types", &dir.path().join("apps/web/a.ts"));
+        let root = canonical(&dir);
+        let got = e.resolve("@mastore/shared-types", &root.join("apps/web/a.ts"));
         assert_eq!(
             got,
-            Resolution::Internal(dir.path().join("packages/shared-types/index.ts"))
+            Resolution::Internal(root.join("packages/shared-types/index.ts"))
         );
     }
 
@@ -736,11 +767,12 @@ export * from "./barrel";"#,
         );
         write(&dir, "packages/shared-types/dist/index.js", "");
         let e = TypeScriptExtractor::new(dir.path());
-        let got = e.resolve("@mastore/shared-types", &dir.path().join("apps/web/a.ts"));
+        let root = canonical(&dir);
+        let got = e.resolve("@mastore/shared-types", &root.join("apps/web/a.ts"));
         // The tsconfig alias target, not the workspace package's `main`.
         assert_eq!(
             got,
-            Resolution::Internal(dir.path().join("packages/shared-types/src/index.ts"))
+            Resolution::Internal(root.join("packages/shared-types/src/index.ts"))
         );
     }
 
@@ -760,10 +792,11 @@ export * from "./barrel";"#,
         );
         write(&dir, "packages/shared-types/index.ts", "");
         let e = TypeScriptExtractor::new(dir.path());
-        let got = e.resolve("@mastore/shared-types", &dir.path().join("apps/web/a.ts"));
+        let root = canonical(&dir);
+        let got = e.resolve("@mastore/shared-types", &root.join("apps/web/a.ts"));
         assert_eq!(
             got,
-            Resolution::Internal(dir.path().join("packages/shared-types/index.ts"))
+            Resolution::Internal(root.join("packages/shared-types/index.ts"))
         );
     }
 

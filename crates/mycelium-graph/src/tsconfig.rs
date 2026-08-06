@@ -29,8 +29,14 @@ pub struct PathMapping {
     pub targets: Vec<PathBuf>,
 }
 
-/// A tsconfig that could not be used. Never fatal: the subtree it governs
-/// falls back to relative-only resolution, but the reason is never lost.
+/// A config file that was found but could not be used — for this index,
+/// always a tsconfig. Never fatal: the subtree it would have governed falls
+/// back to weaker resolution, but the reason is never lost.
+///
+/// The shape (`path`, `reason`) is language-neutral, which is why
+/// `Extractor::skipped_configs` returns it as the general "one config file
+/// skipped, and why" type: it lives in this module because `TsConfigIndex`
+/// is its only producer today, not because the concept is tsconfig-specific.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SkippedConfig {
     pub path: PathBuf,

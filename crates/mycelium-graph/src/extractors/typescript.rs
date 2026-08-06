@@ -27,10 +27,13 @@ const INDEX_EXTENSIONS: &[&str] = &["ts", "tsx", "js", "jsx"];
 struct WorkspacePackage {
     /// The package's own directory.
     dir: PathBuf,
-    /// Best entry-point candidate for a bare import of the package: its
-    /// declared `exports`/`main` (normalised, may not exist on disk), or
-    /// the package directory itself so `probe`'s directory-index fallback
-    /// applies.
+    /// Best entry-point candidate for a bare import of the package. See
+    /// [`TypeScriptExtractor::entry_point`] for the source-preferring
+    /// priority order: this is either a real file already found on disk
+    /// among the package's declared `types`/`exports`/`main` fields, or —
+    /// if none of them resolved to anything — the bare package directory,
+    /// so `probe`'s directory-index fallback still applies when `resolve`
+    /// uses this field.
     entry: PathBuf,
 }
 
@@ -59,8 +62,10 @@ impl TypeScriptExtractor {
     }
 
     /// Probe a resolution candidate: exact file, then each extension,
-    /// then the directory's index file.
-    fn probe(&self, candidate: &Path) -> Option<PathBuf> {
+    /// then the directory's index file. Never touches `self` — an
+    /// associated function rather than a method so `entry_point` can call
+    /// it while building `workspace_packages`, before `Self` exists.
+    fn probe(candidate: &Path) -> Option<PathBuf> {
         if candidate.is_file() {
             return Some(candidate.to_path_buf());
         }
@@ -254,26 +259,77 @@ impl TypeScriptExtractor {
         name == "node_modules" || (name.starts_with('.') && name != "." && name != "..")
     }
 
-    /// A package's best entry-point candidate: its declared
-    /// `exports`/`main`, or the package directory itself so `probe`'s
-    /// directory-index fallback (`index.{ts,tsx,js,jsx}`) applies.
+    /// A package's best entry-point candidate.
+    ///
+    /// Kora graphs source, not build output — the original design ("resolved
+    /// to its `main`/`exports`, else `index.ts`") is correct for a runtime
+    /// resolver but wrong here: on the acceptance target,
+    /// `@mastore/shared-types` declares `main` and `exports["."].import`
+    /// both pointing at a gitignored `dist/index.js`, while
+    /// `exports["."].types` (and the older top-level `types`) point at the
+    /// real TypeScript source. Following `exports`/`main` literally landed
+    /// 44 real imports of that package outside the scanned node set.
+    ///
+    /// Candidates are tried in this order, each falling through to the next
+    /// when the shape is not understood *or* the candidate does not
+    /// resolve to a real file on disk — a `types`/`typings` entry pointing
+    /// at a `.d.ts` file is still source-tree-shaped (better than `dist/`),
+    /// so it is taken as-is, no special-casing:
+    /// 1. `exports["."].types` — the conditional-exports types entry.
+    /// 2. top-level `types`, then `typings` (older spelling, same meaning).
+    /// 3. `exports["."]` `import`/`default`, or the whole field as a
+    ///    string — the shapes this extractor already understood.
+    /// 4. top-level `main`.
+    /// 5. `<dir>/index.{ts,tsx,js,jsx}`: not tried here — every explicit
+    ///    candidate above missing on disk falls through to the bare
+    ///    package directory, and `resolve`'s later `probe` call finds the
+    ///    index file the same way it always has.
     fn entry_point(dir: &Path, manifest: &Value) -> PathBuf {
-        let target = Self::exports_target(manifest.get("exports")).or_else(|| {
-            manifest
-                .get("main")
-                .and_then(Value::as_str)
-                .map(str::to_string)
-        });
-        match target {
-            Some(t) => crate::tsconfig::normalise_public(&dir.join(t)),
-            None => dir.to_path_buf(),
+        let exports = manifest.get("exports");
+        let candidates = [
+            Self::exports_types_target(exports),
+            Self::top_level_string(manifest, "types"),
+            Self::top_level_string(manifest, "typings"),
+            Self::exports_target(exports),
+            Self::top_level_string(manifest, "main"),
+        ];
+        for candidate in candidates.into_iter().flatten() {
+            let joined = crate::tsconfig::normalise_public(&dir.join(candidate));
+            if let Some(resolved) = Self::probe(&joined) {
+                return resolved;
+            }
         }
+        dir.to_path_buf()
+    }
+
+    /// `exports["."].types`: only that one shape (`exports["."]` an object
+    /// with a `types` key whose value is a string). Anything else — no
+    /// `exports`, no `.` key, `exports["."]` not an object, `types` not a
+    /// string — yields `None` so `entry_point` falls through.
+    fn exports_types_target(exports: Option<&Value>) -> Option<String> {
+        exports?
+            .get(".")?
+            .get("types")?
+            .as_str()
+            .map(str::to_string)
+    }
+
+    /// A top-level string field, e.g. `types`, `typings`, or `main`.
+    fn top_level_string(manifest: &Value, field: &str) -> Option<String> {
+        manifest
+            .get(field)
+            .and_then(Value::as_str)
+            .map(str::to_string)
     }
 
     /// Only the simple `exports` shapes: a string, or an object with a
     /// `.` key whose value is a string or has `import`/`default`.
-    /// Anything more elaborate falls through to `main` instead of
-    /// guessing wrong — v0 does not need a full exports resolver.
+    /// Anything more elaborate yields `None` — `entry_point` falls through
+    /// to `main` rather than this function guessing wrong. Never mixed
+    /// with `types`/`typings`: those are tried first, by `entry_point`,
+    /// specifically because this shape prefers `import`/`default`
+    /// (build output) over `types` (source) when both are present in the
+    /// same `exports["."]` object.
     fn exports_target(exports: Option<&Value>) -> Option<String> {
         match exports? {
             Value::String(s) => Some(s.clone()),
@@ -342,7 +398,7 @@ impl Extractor for TypeScriptExtractor {
                 None => return Resolution::Unresolved,
             };
             let candidate = crate::tsconfig::normalise_public(&base.join(raw));
-            return match self.probe(&candidate) {
+            return match Self::probe(&candidate) {
                 Some(path) => Resolution::Internal(path),
                 None => Resolution::Unresolved,
             };
@@ -355,7 +411,7 @@ impl Extractor for TypeScriptExtractor {
             for target in &mapping.targets {
                 if let Some(candidate) = Self::expand(&mapping.pattern, target, raw) {
                     matched_an_alias = true;
-                    if let Some(path) = self.probe(&candidate) {
+                    if let Some(path) = Self::probe(&candidate) {
                         return Resolution::Internal(path);
                     }
                 }
@@ -399,7 +455,7 @@ impl Extractor for TypeScriptExtractor {
             };
 
             if let Some(candidate) = candidate {
-                if let Some(path) = self.probe(&candidate) {
+                if let Some(path) = Self::probe(&candidate) {
                     return Resolution::Internal(path);
                 }
             }
@@ -665,6 +721,65 @@ export * from "./barrel";"#,
         let e = TypeScriptExtractor::new(dir.path());
         let root = canonical(&dir);
         let got = e.resolve("@mastore/shared-types", &root.join("apps/web/a.ts"));
+        assert_eq!(
+            got,
+            Resolution::Internal(root.join("packages/shared-types/src/index.ts"))
+        );
+    }
+
+    #[test]
+    fn exports_types_wins_over_exports_import_pointing_at_dist() {
+        // The real shape on the acceptance target: `main` and
+        // `exports["."].import` both point at a gitignored `dist/`, while
+        // `exports["."].types` points at the real TypeScript source. Kora
+        // graphs source, not build output, so `types` must win. **Load-
+        // bearing**: see the fix report for the break/restore proof.
+        let dir = TempDir::new().unwrap();
+        write(&dir, "package.json", r#"{ "workspaces": ["packages/*"] }"#);
+        write(
+            &dir,
+            "packages/shared-types/package.json",
+            r#"{
+                "name": "@mastore/shared-types",
+                "main": "./dist/index.js",
+                "exports": { ".": {
+                    "types": "./src/index.ts",
+                    "require": "./dist/index.js",
+                    "import": "./dist/index.js"
+                } }
+            }"#,
+        );
+        write(&dir, "packages/shared-types/src/index.ts", "");
+        write(&dir, "packages/shared-types/dist/index.js", "");
+        let e = TypeScriptExtractor::new(dir.path());
+        let root = canonical(&dir);
+        let got = e.resolve("@mastore/shared-types", &root.join("apps/backend/a.ts"));
+        assert_eq!(
+            got,
+            Resolution::Internal(root.join("packages/shared-types/src/index.ts"))
+        );
+    }
+
+    #[test]
+    fn a_top_level_types_field_wins_over_main_pointing_at_dist() {
+        // Same intent, older/simpler shape: no `exports` at all, just a
+        // top-level `types` alongside a `main` that points at build output.
+        let dir = TempDir::new().unwrap();
+        write(&dir, "package.json", r#"{ "workspaces": ["packages/*"] }"#);
+        write(
+            &dir,
+            "packages/shared-types/package.json",
+            r#"{
+                "name": "@mastore/shared-types",
+                "main": "./dist/index.js",
+                "types": "./src/index.ts"
+            }"#,
+        );
+        write(&dir, "packages/shared-types/src/index.ts", "");
+        write(&dir, "packages/shared-types/dist/index.js", "");
+        let e = TypeScriptExtractor::new(dir.path());
+        let root = canonical(&dir);
+        let got = e.resolve("@mastore/shared-types", &root.join("apps/backend/a.ts"));
         assert_eq!(
             got,
             Resolution::Internal(root.join("packages/shared-types/src/index.ts"))

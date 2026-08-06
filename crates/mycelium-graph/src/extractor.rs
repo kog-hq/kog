@@ -1,3 +1,4 @@
+use crate::tsconfig::SkippedConfig;
 use std::path::{Path, PathBuf};
 
 /// One import specifier as written in the source, before any resolution.
@@ -44,6 +45,18 @@ pub trait Extractor {
 
     /// Turn one specifier into a resolution, given the file that wrote it.
     fn resolve(&self, raw: &str, importer: &Path) -> Resolution;
+
+    /// Config files this extractor found but could not use — e.g. an
+    /// unreadable or malformed tsconfig. The subtree such a config governs
+    /// silently degrades to weaker resolution, so this must never disappear
+    /// (design doc §7). Paths are absolute; `build_graph` turns them into
+    /// project-relative `Failure`s like every other entry in
+    /// `stats.failures`.
+    ///
+    /// Empty by default: most extractors have no notion of a skipped config.
+    fn skipped_configs(&self) -> &[SkippedConfig] {
+        &[]
+    }
 }
 
 #[cfg(test)]

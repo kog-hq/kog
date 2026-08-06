@@ -1,5 +1,5 @@
 use crate::extractor::{ExtractError, Extractor, Resolution, Specifier};
-use crate::tsconfig::TsConfigIndex;
+use crate::tsconfig::{SkippedConfig, TsConfigIndex};
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::fs;
@@ -356,6 +356,10 @@ impl Extractor for TypeScriptExtractor {
 
         // 4. Anything else is a third-party package.
         Resolution::External(raw.to_string())
+    }
+
+    fn skipped_configs(&self) -> &[SkippedConfig] {
+        self.tsconfig.skipped()
     }
 }
 

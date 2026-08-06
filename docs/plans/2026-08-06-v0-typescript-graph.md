@@ -1,78 +1,78 @@
-# KOG v0 — plan d'implémentation
+# KOG v0 — implementation plan
 
-> Le projet s'appelait `mycelium` pendant toute l'exécution de ce plan ; il a été renommé
-> `kog` après la fusion de la v0. Les noms de crates, de binaire et de chemins ont été mis à
-> jour ici pour rester utilisables, mais les instructions d'origine désignaient `mycelium`.
+> The project was called `mycelium` throughout this plan's execution; it was renamed
+> `kog` after the v0 merge. Crate, binary and path names have been updated here to stay
+> usable, but the original instructions referred to `mycelium`.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal :** parser un projet TypeScript vers un graphe fichiers/imports, l'écrire en
-`graph.json` avec son taux de résolution mesuré, et l'afficher en WebGL.
+**Goal:** parse a TypeScript project into a file/import graph, write it to
+`graph.json` with its measured resolution rate, and render it in WebGL.
 
-**Architecture :** un workspace Rust à deux crates. `kog-graph` expose un trait
-`Extractor` et une unique implémentation TypeScript (tree-sitter + tsconfig) ;
-`kog-cli` orchestre parcours, extraction, résolution et sérialisation. Une page
-Vite+sigma consomme le JSON. Aucune couche Tauri en v0.
+**Architecture:** a two-crate Rust workspace. `kog-graph` exposes an `Extractor`
+trait and a single TypeScript implementation (tree-sitter + tsconfig);
+`kog-cli` orchestrates traversal, extraction, resolution and serialization. A
+Vite+sigma page consumes the JSON. No Tauri layer in v0.
 
-**Tech stack :** Rust 2021 · tree-sitter 0.26.11 · tree-sitter-typescript 0.23.2 ·
+**Tech stack:** Rust 2021 · tree-sitter 0.26.11 · tree-sitter-typescript 0.23.2 ·
 jsonc-parser 0.33.1 · ignore · serde/serde_json · clap 4 · Vite · React · TypeScript ·
 sigma 3.0.3 · graphology 0.26.0
 
-## Contraintes globales
+## Global constraints
 
-- Le spec de référence est `docs/design/v0-design.md`. En cas de contradiction, le spec
-  fait foi.
-- Code, commentaires, identifiants, messages produit et messages de commit : **en
-  anglais**. Documentation : en français.
-- Commits conventionnels (`feat:`, `fix:`, `test:`, `docs:`, `chore:`, `ci:`).
-- **Ne jamais surcharger l'identité git.** Pas de `-c user.email`, pas de `user.*` en
-  local : la config globale de la machine fait autorité.
-- `~/.cargo/bin` est absent du PATH non interactif. Toute commande cargo doit être
-  précédée de `export PATH="$HOME/.cargo/bin:$PATH"`.
-- Aucun filtre ne doit *fail open* : un filtre qui ne peut pas s'appliquer exclut.
-- Chaque tâche se termine sur `cargo fmt`, `cargo clippy -- -D warnings` et
-  `cargo test` verts avant commit.
-- Périmètre gelé : ni Tauri, ni Leiden, ni multi-projets, ni IA, ni calques, ni graphe
-  de sessions. Voir §10 du spec.
+- The reference spec is `docs/design/v0-design.md`. In case of contradiction, the
+  spec governs.
+- Code, comments, identifiers, product strings and commit messages: **English**.
+  Documentation: **English**.
+- Conventional commits (`feat:`, `fix:`, `test:`, `docs:`, `chore:`, `ci:`).
+- **Never override the git identity.** No `-c user.email`, no local `user.*`: the
+  machine's global config governs.
+- `~/.cargo/bin` is absent from the non-interactive PATH. Every cargo command must be
+  preceded by `export PATH="$HOME/.cargo/bin:$PATH"`.
+- No filter should *fail open*: a filter that cannot apply excludes.
+- Every task ends with `cargo fmt`, `cargo clippy -- -D warnings` and
+  `cargo test` green before commit.
+- Scope frozen: no Tauri, no Leiden, no multi-project, no AI, no overlays, no
+  session graph. See spec §10.
 
-### Projets de référence (chemins absolus, machine de développement)
+### Reference projects (absolute paths, development machine)
 
-| Rôle | Chemin | Volume |
+| Role | Path | Volume |
 | --- | --- | --- |
-| Fixture rapide | `~/apps/lueur` | 93 fichiers, alias `@/*` |
-| Cible d'acceptation | `~/Mastore/mastore-saas` | 727 fichiers, monorepo Turborepo |
+| Quick fixture | `~/apps/lueur` | 93 files, `@/*` alias |
+| Acceptance target | `~/Mastore/mastore-saas` | 727 files, Turborepo monorepo |
 
 ---
 
-## Structure des fichiers
+## File structure
 
-| Fichier | Responsabilité |
+| File | Responsibility |
 | --- | --- |
-| `crates/kog-graph/src/model.rs` | `Graph`, `Node`, `Edge`, `Stats`, `Failure`. Serde. Agnostique du langage, zéro logique |
-| `crates/kog-graph/src/extractor.rs` | Trait `Extractor`, `Specifier`, `Resolution`, `ExtractError` |
-| `crates/kog-graph/src/tsconfig.rs` | Chargement JSONC, chaîne `extends`, index de mappings par répertoire |
-| `crates/kog-graph/src/extractors/typescript.rs` | Grammaire tree-sitter, requête d'imports, règles de résolution TS |
-| `crates/kog-graph/src/discover.rs` | Parcours respectant `.gitignore`, filtrage par extensions |
-| `crates/kog-graph/src/graph.rs` | Assemblage, déduplication, statistiques |
-| `crates/kog-graph/src/lib.rs` | Réexports publics |
-| `crates/kog-cli/src/main.rs` | CLI clap, orchestration, sortie JSON et résumé |
-| `app/src/main.tsx` | Chargement `graph.json`, graphology, sigma |
+| `crates/kog-graph/src/model.rs` | `Graph`, `Node`, `Edge`, `Stats`, `Failure`. Serde. Language-agnostic, zero logic |
+| `crates/kog-graph/src/extractor.rs` | `Extractor` trait, `Specifier`, `Resolution`, `ExtractError` |
+| `crates/kog-graph/src/tsconfig.rs` | JSONC loading, `extends` chain, per-directory mapping index |
+| `crates/kog-graph/src/extractors/typescript.rs` | tree-sitter grammar, import query, TS resolution rules |
+| `crates/kog-graph/src/discover.rs` | Traversal respecting `.gitignore`, filtering by extension |
+| `crates/kog-graph/src/graph.rs` | Assembly, deduplication, statistics |
+| `crates/kog-graph/src/lib.rs` | Public re-exports |
+| `crates/kog-cli/src/main.rs` | clap CLI, orchestration, JSON output and summary |
+| `app/src/main.tsx` | Loads `graph.json`, graphology, sigma |
 
 ---
 
-## Task 1 — scaffolding du workspace
+## Task 1 — workspace scaffolding
 
-**Fichiers :**
-- Créer : `Cargo.toml`, `rust-toolchain.toml`, `.gitignore`, `LICENSE-MIT`,
+**Files:**
+- Create: `Cargo.toml`, `rust-toolchain.toml`, `.gitignore`, `LICENSE-MIT`,
   `LICENSE-APACHE`, `.gitleaks.toml`, `.github/workflows/ci.yml`,
   `crates/kog-graph/Cargo.toml`, `crates/kog-graph/src/lib.rs`,
   `crates/kog-cli/Cargo.toml`, `crates/kog-cli/src/main.rs`
 
-**Interfaces :**
-- Consomme : rien.
-- Produit : un workspace qui compile, `kog` en binaire.
+**Interfaces:**
+- Consumes: nothing.
+- Produces: a workspace that compiles, `kog` as a binary.
 
-- [ ] **Étape 1 : récupérer le scaffolding réutilisable de dejavu**
+- [ ] **Step 1: pull the reusable scaffolding from dejavu**
 
 ```bash
 cd ~/apps/mycelium
@@ -85,16 +85,16 @@ cp ~/apps/dejavu/.github/{CODE_OF_CONDUCT.md,CONTRIBUTING.md,SECURITY.md,PULL_RE
 cp -r ~/apps/dejavu/.github/ISSUE_TEMPLATE .github/
 ```
 
-Relire ensuite chaque fichier copié et remplacer toute occurrence de `dejavu` par
-`mycelium` — le nom du projet à cette date. Vérifier :
+Then reread every copied file and replace every occurrence of `dejavu` with
+`mycelium` — the project's name as of this date. Verify:
 
 ```bash
-rg -i "dejavu" . --glob '!.git' || echo "aucune occurrence résiduelle"
+rg -i "dejavu" . --glob '!.git' || echo "no residual occurrence"
 ```
 
-- [ ] **Étape 2 : écrire le manifeste du workspace**
+- [ ] **Step 2: write the workspace manifest**
 
-`Cargo.toml` :
+`Cargo.toml`:
 
 ```toml
 [workspace]
@@ -119,7 +119,7 @@ tree-sitter = "0.26"
 tree-sitter-typescript = "0.23"
 ```
 
-`crates/kog-graph/Cargo.toml` :
+`crates/kog-graph/Cargo.toml`:
 
 ```toml
 [package]
@@ -144,7 +144,7 @@ tree-sitter-typescript.workspace = true
 tempfile = "3"
 ```
 
-`crates/kog-cli/Cargo.toml` :
+`crates/kog-cli/Cargo.toml`:
 
 ```toml
 [package]
@@ -166,15 +166,15 @@ kog-graph = { path = "../kog-graph" }
 serde_json.workspace = true
 ```
 
-- [ ] **Étape 3 : squelettes de sources**
+- [ ] **Step 3: source skeletons**
 
-`crates/kog-graph/src/lib.rs` :
+`crates/kog-graph/src/lib.rs`:
 
 ```rust
 //! Turns a codebase into a file/import graph.
 ```
 
-`crates/kog-cli/src/main.rs` :
+`crates/kog-cli/src/main.rs`:
 
 ```rust
 fn main() {
@@ -182,16 +182,16 @@ fn main() {
 }
 ```
 
-- [ ] **Étape 4 : vérifier que le workspace compile**
+- [ ] **Step 4: verify the workspace compiles**
 
 ```bash
 export PATH="$HOME/.cargo/bin:$PATH"
 cargo build 2>&1 | tail -5
 ```
 
-Attendu : `Finished`, aucune erreur.
+Expected: `Finished`, no errors.
 
-- [ ] **Étape 5 : commit**
+- [ ] **Step 5: commit**
 
 ```bash
 git add -A
@@ -200,21 +200,21 @@ git commit -m "chore: set up the cargo workspace and open source scaffolding"
 
 ---
 
-## Task 2 — le modèle de graphe
+## Task 2 — the graph model
 
-**Fichiers :**
-- Créer : `crates/kog-graph/src/model.rs`
-- Modifier : `crates/kog-graph/src/lib.rs`
+**Files:**
+- Create: `crates/kog-graph/src/model.rs`
+- Modify: `crates/kog-graph/src/lib.rs`
 
-**Interfaces :**
-- Consomme : rien.
-- Produit : `Graph`, `Node`, `Edge`, `EdgeKind`, `Stats`, `Failure`. Toutes les tâches
-  suivantes en dépendent. Champs exactement tels que ci-dessous — le spec §5 fixe le
-  format JSON, il ne doit pas dériver.
+**Interfaces:**
+- Consumes: nothing.
+- Produces: `Graph`, `Node`, `Edge`, `EdgeKind`, `Stats`, `Failure`. Every following
+  task depends on them. Fields exactly as below — spec §5 fixes the JSON format, it
+  must not drift.
 
-- [ ] **Étape 1 : écrire le test qui échoue**
+- [ ] **Step 1: write the failing test**
 
-`crates/kog-graph/src/model.rs`, en fin de fichier :
+`crates/kog-graph/src/model.rs`, at the end of the file:
 
 ```rust
 #[cfg(test)]
@@ -262,18 +262,18 @@ mod tests {
 }
 ```
 
-- [ ] **Étape 2 : lancer le test et vérifier qu'il échoue**
+- [ ] **Step 2: run the test and verify it fails**
 
 ```bash
 export PATH="$HOME/.cargo/bin:$PATH"
 cargo test -p kog-graph 2>&1 | tail -15
 ```
 
-Attendu : erreurs de compilation, `cannot find type Stats`, `Graph`, `Node`, `Edge`.
+Expected: compile errors, `cannot find type Stats`, `Graph`, `Node`, `Edge`.
 
-- [ ] **Étape 3 : écrire l'implémentation minimale**
+- [ ] **Step 3: write the minimal implementation**
 
-En tête de `crates/kog-graph/src/model.rs` :
+At the top of `crates/kog-graph/src/model.rs`:
 
 ```rust
 use serde::{Deserialize, Serialize};
@@ -343,11 +343,11 @@ pub struct Graph {
 }
 ```
 
-Note : `Stats` porte à la fois le champ `resolution_rate` (sérialisé, rempli par
-`graph.rs` en tâche 7) et la méthode `resolution_rate()` qui le calcule. Le champ existe
-pour que le JSON soit lisible sans recalcul ; la méthode est la source de vérité.
+Note: `Stats` carries both the `resolution_rate` field (serialized, filled in by
+`graph.rs` in task 7) and the `resolution_rate()` method that computes it. The field
+exists so the JSON is readable without recomputation; the method is the source of truth.
 
-Dans `lib.rs` :
+In `lib.rs`:
 
 ```rust
 //! Turns a codebase into a file/import graph.
@@ -357,15 +357,15 @@ pub mod model;
 pub use model::{Edge, EdgeKind, Failure, Graph, Node, Stats};
 ```
 
-- [ ] **Étape 4 : lancer les tests et vérifier qu'ils passent**
+- [ ] **Step 4: run the tests and verify they pass**
 
 ```bash
 cargo test -p kog-graph 2>&1 | tail -8
 ```
 
-Attendu : `test result: ok. 3 passed`.
+Expected: `test result: ok. 3 passed`.
 
-- [ ] **Étape 5 : commit**
+- [ ] **Step 5: commit**
 
 ```bash
 cargo fmt && cargo clippy -- -D warnings && cargo test
@@ -374,21 +374,21 @@ git add -A && git commit -m "feat(model): add the language-agnostic graph model"
 
 ---
 
-## Task 3 — le trait Extractor
+## Task 3 — the Extractor trait
 
-**Fichiers :**
-- Créer : `crates/kog-graph/src/extractor.rs`
-- Modifier : `crates/kog-graph/src/lib.rs`
+**Files:**
+- Create: `crates/kog-graph/src/extractor.rs`
+- Modify: `crates/kog-graph/src/lib.rs`
 
-**Interfaces :**
-- Consomme : rien du modèle.
-- Produit : `Specifier`, `Resolution`, `ExtractError`, trait `Extractor`. La tâche 6
-  l'implémente, la tâche 7 le consomme. Ajouter Go en v0.2 doit se réduire à une
-  nouvelle implémentation de ce trait.
+**Interfaces:**
+- Consumes: nothing from the model.
+- Produces: `Specifier`, `Resolution`, `ExtractError`, the `Extractor` trait. Task 6
+  implements it, task 7 consumes it. Adding Go in v0.2 must reduce to a new
+  implementation of this trait.
 
-- [ ] **Étape 1 : écrire le test qui échoue**
+- [ ] **Step 1: write the failing test**
 
-En fin de `crates/kog-graph/src/extractor.rs` :
+At the end of `crates/kog-graph/src/extractor.rs`:
 
 ```rust
 #[cfg(test)]
@@ -455,17 +455,17 @@ mod tests {
 }
 ```
 
-- [ ] **Étape 2 : lancer le test et vérifier qu'il échoue**
+- [ ] **Step 2: run the test and verify it fails**
 
 ```bash
 cargo test -p kog-graph extractor 2>&1 | tail -12
 ```
 
-Attendu : `cannot find trait Extractor`.
+Expected: `cannot find trait Extractor`.
 
-- [ ] **Étape 3 : écrire l'implémentation minimale**
+- [ ] **Step 3: write the minimal implementation**
 
-En tête de `crates/kog-graph/src/extractor.rs` :
+At the top of `crates/kog-graph/src/extractor.rs`:
 
 ```rust
 use std::path::{Path, PathBuf};
@@ -517,10 +517,10 @@ pub trait Extractor {
 }
 ```
 
-Ajouter `thiserror = "2"` aux `workspace.dependencies` du `Cargo.toml` racine et
-`thiserror.workspace = true` aux dépendances de `kog-graph`.
+Add `thiserror = "2"` to the root `Cargo.toml`'s `workspace.dependencies` and
+`thiserror.workspace = true` to `kog-graph`'s dependencies.
 
-Dans `lib.rs` :
+In `lib.rs`:
 
 ```rust
 pub mod extractor;
@@ -528,15 +528,15 @@ pub mod extractor;
 pub use extractor::{ExtractError, Extractor, Resolution, Specifier};
 ```
 
-- [ ] **Étape 4 : lancer les tests et vérifier qu'ils passent**
+- [ ] **Step 4: run the tests and verify they pass**
 
 ```bash
 cargo test -p kog-graph 2>&1 | tail -8
 ```
 
-Attendu : `test result: ok. 7 passed`.
+Expected: `test result: ok. 7 passed`.
 
-- [ ] **Étape 5 : commit**
+- [ ] **Step 5: commit**
 
 ```bash
 cargo fmt && cargo clippy -- -D warnings && cargo test
@@ -545,27 +545,27 @@ git add -A && git commit -m "feat(extractor): add the language front end trait"
 
 ---
 
-## Task 4 — chargement des tsconfig
+## Task 4 — loading tsconfig
 
-**Fichiers :**
-- Créer : `crates/kog-graph/src/tsconfig.rs`
-- Modifier : `crates/kog-graph/src/lib.rs`
+**Files:**
+- Create: `crates/kog-graph/src/tsconfig.rs`
+- Modify: `crates/kog-graph/src/lib.rs`
 
-**Interfaces :**
-- Consomme : rien.
-- Produit : `TsConfigIndex::build(root) -> TsConfigIndex` et
-  `TsConfigIndex::mappings_for(&self, importer: &Path) -> &[PathMapping]`, avec
-  `PathMapping { pattern: String, targets: Vec<PathBuf> }` dont les `targets` sont déjà
-  **absolues**. Consommé par la tâche 6.
+**Interfaces:**
+- Consumes: nothing.
+- Produces: `TsConfigIndex::build(root) -> TsConfigIndex` and
+  `TsConfigIndex::mappings_for(&self, importer: &Path) -> &[PathMapping]`, with
+  `PathMapping { pattern: String, targets: Vec<PathBuf> }` whose `targets` are already
+  **absolute**. Consumed by task 6.
 
-**Pourquoi cette tâche est la plus importante du plan.** Mesuré sur la cible
-d'acceptation : 2 651 des 3 209 imports internes passent par un alias. Sans cette tâche,
-82,6 % des arêtes disparaissent. Et **3 des 6 tsconfig contiennent des commentaires**
-(`//`) — un `serde_json::from_str` échouerait sur la moitié d'entre eux.
+**Why this is the most important task in the plan.** Measured on the acceptance
+target: 2,651 of the 3,209 internal imports go through an alias. Without this task,
+82.6 % of the edges disappear. And **3 of the 6 tsconfigs contain comments**
+(`//`) — a plain `serde_json::from_str` would fail on half of them.
 
-- [ ] **Étape 1 : écrire le test qui échoue**
+- [ ] **Step 1: write the failing test**
 
-En fin de `crates/kog-graph/src/tsconfig.rs` :
+At the end of `crates/kog-graph/src/tsconfig.rs`:
 
 ```rust
 #[cfg(test)]
@@ -709,17 +709,17 @@ mod tests {
 }
 ```
 
-- [ ] **Étape 2 : lancer le test et vérifier qu'il échoue**
+- [ ] **Step 2: run the test and verify it fails**
 
 ```bash
 cargo test -p kog-graph tsconfig 2>&1 | tail -12
 ```
 
-Attendu : `cannot find type TsConfigIndex`.
+Expected: `cannot find type TsConfigIndex`.
 
-- [ ] **Étape 3 : écrire l'implémentation minimale**
+- [ ] **Step 3: write the minimal implementation**
 
-En tête de `crates/kog-graph/src/tsconfig.rs` :
+At the top of `crates/kog-graph/src/tsconfig.rs`:
 
 ```rust
 use serde::Deserialize;
@@ -877,7 +877,7 @@ fn normalise(path: &Path) -> PathBuf {
 }
 ```
 
-Dans `lib.rs` :
+In `lib.rs`:
 
 ```rust
 pub mod tsconfig;
@@ -885,15 +885,15 @@ pub mod tsconfig;
 pub use tsconfig::{PathMapping, TsConfigIndex};
 ```
 
-- [ ] **Étape 4 : lancer les tests et vérifier qu'ils passent**
+- [ ] **Step 4: run the tests and verify they pass**
 
 ```bash
 cargo test -p kog-graph 2>&1 | tail -8
 ```
 
-Attendu : `test result: ok. 15 passed`.
+Expected: `test result: ok. 15 passed`.
 
-- [ ] **Étape 5 : vérifier contre les vrais tsconfig de la cible**
+- [ ] **Step 5: verify against the target's real tsconfigs**
 
 ```bash
 cat >> crates/kog-graph/src/tsconfig.rs <<'RUST'
@@ -929,10 +929,10 @@ RUST
 cargo test -p kog-graph -- --ignored 2>&1 | tail -8
 ```
 
-Attendu : `test result: ok. 1 passed`. Si ce test échoue, la gate de la tâche 10 ne peut
-pas passer — corriger avant de continuer.
+Expected: `test result: ok. 1 passed`. If this test fails, task 10's gate cannot
+pass — fix it before continuing.
 
-- [ ] **Étape 6 : commit**
+- [ ] **Step 6: commit**
 
 ```bash
 cargo fmt && cargo clippy -- -D warnings && cargo test
@@ -941,20 +941,20 @@ git add -A && git commit -m "feat(tsconfig): resolve path aliases across extends
 
 ---
 
-## Task 5 — découverte des fichiers
+## Task 5 — file discovery
 
-**Fichiers :**
-- Créer : `crates/kog-graph/src/discover.rs`
-- Modifier : `crates/kog-graph/src/lib.rs`
+**Files:**
+- Create: `crates/kog-graph/src/discover.rs`
+- Modify: `crates/kog-graph/src/lib.rs`
 
-**Interfaces :**
-- Consomme : `Extractor::extensions()` de la tâche 3.
-- Produit : `discover(root: &Path, extensions: &[&str]) -> Vec<PathBuf>`, chemins
-  absolus, triés. Consommé par la tâche 7.
+**Interfaces:**
+- Consumes: `Extractor::extensions()` from task 3.
+- Produces: `discover(root: &Path, extensions: &[&str]) -> Vec<PathBuf>`, absolute,
+  sorted paths. Consumed by task 7.
 
-- [ ] **Étape 1 : écrire le test qui échoue**
+- [ ] **Step 1: write the failing test**
 
-En fin de `crates/kog-graph/src/discover.rs` :
+At the end of `crates/kog-graph/src/discover.rs`:
 
 ```rust
 #[cfg(test)]
@@ -1022,17 +1022,17 @@ mod tests {
 }
 ```
 
-- [ ] **Étape 2 : lancer le test et vérifier qu'il échoue**
+- [ ] **Step 2: run the test and verify it fails**
 
 ```bash
 cargo test -p kog-graph discover 2>&1 | tail -12
 ```
 
-Attendu : `cannot find function discover`.
+Expected: `cannot find function discover`.
 
-- [ ] **Étape 3 : écrire l'implémentation minimale**
+- [ ] **Step 3: write the minimal implementation**
 
-En tête de `crates/kog-graph/src/discover.rs` :
+At the top of `crates/kog-graph/src/discover.rs`:
 
 ```rust
 use std::path::{Path, PathBuf};
@@ -1080,7 +1080,7 @@ pub fn discover(root: &Path, extensions: &[&str]) -> Vec<PathBuf> {
 }
 ```
 
-Dans `lib.rs` :
+In `lib.rs`:
 
 ```rust
 pub mod discover;
@@ -1088,15 +1088,15 @@ pub mod discover;
 pub use discover::discover;
 ```
 
-- [ ] **Étape 4 : lancer les tests et vérifier qu'ils passent**
+- [ ] **Step 4: run the tests and verify they pass**
 
 ```bash
 cargo test -p kog-graph 2>&1 | tail -8
 ```
 
-Attendu : `test result: ok. 20 passed`.
+Expected: `test result: ok. 20 passed`.
 
-- [ ] **Étape 5 : commit**
+- [ ] **Step 5: commit**
 
 ```bash
 cargo fmt && cargo clippy -- -D warnings && cargo test
@@ -1105,27 +1105,27 @@ git add -A && git commit -m "feat(discover): walk a project for source files"
 
 ---
 
-## Task 6 — l'extracteur TypeScript
+## Task 6 — the TypeScript extractor
 
-**Fichiers :**
-- Créer : `crates/kog-graph/src/extractors/mod.rs`,
+**Files:**
+- Create: `crates/kog-graph/src/extractors/mod.rs`,
   `crates/kog-graph/src/extractors/typescript.rs`
-- Modifier : `crates/kog-graph/src/lib.rs`
+- Modify: `crates/kog-graph/src/lib.rs`
 
-**Interfaces :**
-- Consomme : `Extractor`, `Specifier`, `Resolution`, `ExtractError` (tâche 3) ;
-  `TsConfigIndex` (tâche 4).
-- Produit : `TypeScriptExtractor::new(root: &Path) -> Self`, implémentant `Extractor`.
-  Consommé par la tâche 7.
+**Interfaces:**
+- Consumes: `Extractor`, `Specifier`, `Resolution`, `ExtractError` (task 3);
+  `TsConfigIndex` (task 4).
+- Produces: `TypeScriptExtractor::new(root: &Path) -> Self`, implementing `Extractor`.
+  Consumed by task 7.
 
-**API tree-sitter vérifiée par compilation.** `LANGUAGE_TYPESCRIPT` et `LANGUAGE_TSX`
-sont des `LanguageFn` : `(&lang.into())` donne un `Language`. `QueryCursor::matches`
-renvoie un `StreamingIterator`, donc `while let Some(m) = matches.next()` avec
-`use streaming_iterator::StreamingIterator;` en portée — la boucle `for` ne compile pas.
+**tree-sitter API verified by compilation.** `LANGUAGE_TYPESCRIPT` and `LANGUAGE_TSX`
+are `LanguageFn`: `(&lang.into())` gives a `Language`. `QueryCursor::matches`
+returns a `StreamingIterator`, so `while let Some(m) = matches.next()` with
+`use streaming_iterator::StreamingIterator;` in scope — a `for` loop does not compile.
 
-- [ ] **Étape 1 : écrire le test qui échoue**
+- [ ] **Step 1: write the failing test**
 
-`crates/kog-graph/src/extractors/mod.rs` :
+`crates/kog-graph/src/extractors/mod.rs`:
 
 ```rust
 pub mod typescript;
@@ -1133,7 +1133,7 @@ pub mod typescript;
 pub use typescript::TypeScriptExtractor;
 ```
 
-En fin de `crates/kog-graph/src/extractors/typescript.rs` :
+At the end of `crates/kog-graph/src/extractors/typescript.rs`:
 
 ```rust
 #[cfg(test)]
@@ -1346,17 +1346,17 @@ export * from "./barrel";"#);
 }
 ```
 
-- [ ] **Étape 2 : lancer le test et vérifier qu'il échoue**
+- [ ] **Step 2: run the test and verify it fails**
 
 ```bash
 cargo test -p kog-graph typescript 2>&1 | tail -12
 ```
 
-Attendu : `cannot find type TypeScriptExtractor`.
+Expected: `cannot find type TypeScriptExtractor`.
 
-- [ ] **Étape 3 : écrire l'implémentation minimale**
+- [ ] **Step 3: write the minimal implementation**
 
-En tête de `crates/kog-graph/src/extractors/typescript.rs` :
+At the top of `crates/kog-graph/src/extractors/typescript.rs`:
 
 ```rust
 use crate::extractor::{ExtractError, Extractor, Resolution, Specifier};
@@ -1528,7 +1528,7 @@ impl Extractor for TypeScriptExtractor {
 }
 ```
 
-Exposer `normalise` depuis `tsconfig.rs` en ajoutant, sous la fonction privée :
+Expose `normalise` from `tsconfig.rs` by adding, below the private function:
 
 ```rust
 /// Lexical normalisation, reused by the extractors.
@@ -1537,7 +1537,7 @@ pub fn normalise_public(path: &Path) -> PathBuf {
 }
 ```
 
-Dans `lib.rs` :
+In `lib.rs`:
 
 ```rust
 pub mod extractors;
@@ -1545,15 +1545,15 @@ pub mod extractors;
 pub use extractors::TypeScriptExtractor;
 ```
 
-- [ ] **Étape 4 : lancer les tests et vérifier qu'ils passent**
+- [ ] **Step 4: run the tests and verify they pass**
 
 ```bash
 cargo test -p kog-graph 2>&1 | tail -8
 ```
 
-Attendu : `test result: ok. 38 passed`.
+Expected: `test result: ok. 38 passed`.
 
-- [ ] **Étape 5 : commit**
+- [ ] **Step 5: commit**
 
 ```bash
 cargo fmt && cargo clippy -- -D warnings && cargo test
@@ -1562,20 +1562,20 @@ git add -A && git commit -m "feat(typescript): extract and resolve import specif
 
 ---
 
-## Task 7 — assemblage du graphe
+## Task 7 — graph assembly
 
-**Fichiers :**
-- Créer : `crates/kog-graph/src/graph.rs`
-- Modifier : `crates/kog-graph/src/lib.rs`
+**Files:**
+- Create: `crates/kog-graph/src/graph.rs`
+- Modify: `crates/kog-graph/src/lib.rs`
 
-**Interfaces :**
-- Consomme : `discover` (tâche 5), `Extractor` (tâche 3), `model` (tâche 2).
-- Produit : `build_graph(root: &Path, extractor: &dyn Extractor) -> Graph`. Consommé par
-  la tâche 8.
+**Interfaces:**
+- Consumes: `discover` (task 5), `Extractor` (task 3), `model` (task 2).
+- Produces: `build_graph(root: &Path, extractor: &dyn Extractor) -> Graph`. Consumed
+  by task 8.
 
-- [ ] **Étape 1 : écrire le test qui échoue**
+- [ ] **Step 1: write the failing test**
 
-En fin de `crates/kog-graph/src/graph.rs` :
+At the end of `crates/kog-graph/src/graph.rs`:
 
 ```rust
 #[cfg(test)]
@@ -1686,17 +1686,17 @@ import ghost from "./ghost";"#,
 }
 ```
 
-- [ ] **Étape 2 : lancer le test et vérifier qu'il échoue**
+- [ ] **Step 2: run the test and verify it fails**
 
 ```bash
 cargo test -p kog-graph graph 2>&1 | tail -12
 ```
 
-Attendu : `cannot find function build_graph`.
+Expected: `cannot find function build_graph`.
 
-- [ ] **Étape 3 : écrire l'implémentation minimale**
+- [ ] **Step 3: write the minimal implementation**
 
-En tête de `crates/kog-graph/src/graph.rs` :
+At the top of `crates/kog-graph/src/graph.rs`:
 
 ```rust
 use crate::discover::discover;
@@ -1821,7 +1821,7 @@ pub fn build_graph(root: &Path, extractor: &dyn Extractor) -> Graph {
 }
 ```
 
-Dans `lib.rs` :
+In `lib.rs`:
 
 ```rust
 pub mod graph;
@@ -1829,15 +1829,15 @@ pub mod graph;
 pub use graph::build_graph;
 ```
 
-- [ ] **Étape 4 : lancer les tests et vérifier qu'ils passent**
+- [ ] **Step 4: run the tests and verify they pass**
 
 ```bash
 cargo test -p kog-graph 2>&1 | tail -8
 ```
 
-Attendu : `test result: ok. 46 passed`.
+Expected: `test result: ok. 46 passed`.
 
-- [ ] **Étape 5 : commit**
+- [ ] **Step 5: commit**
 
 ```bash
 cargo fmt && cargo clippy -- -D warnings && cargo test
@@ -1846,18 +1846,18 @@ git add -A && git commit -m "feat(graph): assemble nodes, edges and resolution s
 
 ---
 
-## Task 8 — le CLI
+## Task 8 — the CLI
 
-**Fichiers :**
-- Modifier : `crates/kog-cli/src/main.rs`
+**Files:**
+- Modify: `crates/kog-cli/src/main.rs`
 
-**Interfaces :**
-- Consomme : `build_graph`, `TypeScriptExtractor`, `Graph` (tâches 2, 6, 7).
-- Produit : le binaire `kog` avec la sous-commande `scan`.
+**Interfaces:**
+- Consumes: `build_graph`, `TypeScriptExtractor`, `Graph` (tasks 2, 6, 7).
+- Produces: the `kog` binary with the `scan` subcommand.
 
-- [ ] **Étape 1 : écrire l'implémentation**
+- [ ] **Step 1: write the implementation**
 
-`crates/kog-cli/src/main.rs` :
+`crates/kog-cli/src/main.rs`:
 
 ```rust
 use anyhow::{bail, Context, Result};
@@ -1947,24 +1947,24 @@ fn scan(root: PathBuf, output: PathBuf, stats_only: bool) -> Result<()> {
 }
 ```
 
-- [ ] **Étape 2 : vérifier le comportement sur la fixture rapide**
+- [ ] **Step 2: verify the behaviour on the quick fixture**
 
 ```bash
 export PATH="$HOME/.cargo/bin:$PATH"
 cargo run -q -p kog-cli -- scan ~/apps/lueur --stats-only
 ```
 
-Attendu : `files discovered` proche de 93, `resolution rate` affiché, aucun panic.
+Expected: `files discovered` close to 93, `resolution rate` displayed, no panic.
 
-- [ ] **Étape 3 : vérifier que la racine absente échoue fort**
+- [ ] **Step 3: verify a missing root fails hard**
 
 ```bash
 cargo run -q -p kog-cli -- scan /definitely/not/real --stats-only; echo "exit=$?"
 ```
 
-Attendu : message d'erreur explicite et `exit=1`.
+Expected: explicit error message and `exit=1`.
 
-- [ ] **Étape 4 : commit**
+- [ ] **Step 4: commit**
 
 ```bash
 cargo fmt && cargo clippy -- -D warnings && cargo test
@@ -1973,17 +1973,17 @@ git add -A && git commit -m "feat(cli): add the scan command"
 
 ---
 
-## Task 9 — la page de rendu
+## Task 9 — the rendering page
 
-**Fichiers :**
-- Créer : `app/package.json`, `app/vite.config.ts`, `app/index.html`,
+**Files:**
+- Create: `app/package.json`, `app/vite.config.ts`, `app/index.html`,
   `app/tsconfig.json`, `app/src/main.tsx`, `app/.gitignore`
 
-**Interfaces :**
-- Consomme : `app/public/graph.json`, produit par la tâche 8.
-- Produit : une page qui rend le graphe en WebGL.
+**Interfaces:**
+- Consumes: `app/public/graph.json`, produced by task 8.
+- Produces: a page that renders the graph in WebGL.
 
-- [ ] **Étape 1 : initialiser le front**
+- [ ] **Step 1: bootstrap the frontend**
 
 ```bash
 cd ~/apps/mycelium
@@ -1994,9 +1994,9 @@ bun add sigma graphology graphology-layout-forceatlas2
 printf 'node_modules\ndist\npublic/graph.json\n' > .gitignore
 ```
 
-- [ ] **Étape 2 : écrire le rendu**
+- [ ] **Step 2: write the rendering**
 
-`app/src/main.tsx` :
+`app/src/main.tsx`:
 
 ```tsx
 import Graph from "graphology";
@@ -2082,7 +2082,7 @@ main().catch((error) => {
 });
 ```
 
-`app/index.html` — remplacer le corps par :
+`app/index.html` — replace the body with:
 
 ```html
 <body style="margin:0;background:#0d0d0f">
@@ -2091,10 +2091,10 @@ main().catch((error) => {
 </body>
 ```
 
-Supprimer `app/src/App.tsx`, `app/src/App.css`, `app/src/index.css` et
-`app/src/assets` : la page n'en a pas besoin.
+Delete `app/src/App.tsx`, `app/src/App.css`, `app/src/index.css` and
+`app/src/assets`: the page doesn't need them.
 
-- [ ] **Étape 3 : produire un graphe et l'afficher**
+- [ ] **Step 3: produce a graph and display it**
 
 ```bash
 cd ~/apps/mycelium
@@ -2104,10 +2104,10 @@ cargo run -q -p kog-cli -- scan ~/apps/lueur -o app/public/graph.json
 cd app && bun run dev
 ```
 
-Ouvrir l'URL affichée. Attendu : un graphe coloré par dossier, le badge en haut à gauche
-indiquant nœuds, arêtes et taux de résolution.
+Open the displayed URL. Expected: a graph coloured by folder, the badge in the
+top-left corner showing nodes, edges and the resolution rate.
 
-- [ ] **Étape 4 : commit**
+- [ ] **Step 4: commit**
 
 ```bash
 cd ~/apps/mycelium
@@ -2116,16 +2116,16 @@ git add -A && git commit -m "feat(app): render the graph with sigma"
 
 ---
 
-## Task 10 — la gate d'acceptation
+## Task 10 — the acceptance gate
 
-**Fichiers :**
-- Créer : `docs/measurements/2026-08-06-v0-gate.md`
+**Files:**
+- Create: `docs/measurements/2026-08-06-v0-gate.md`
 
-**Interfaces :**
-- Consomme : tout ce qui précède.
-- Produit : la preuve mesurée que la v0 est terminée, ou la liste de ce qui manque.
+**Interfaces:**
+- Consumes: everything above.
+- Produces: the measured proof that v0 is done, or the list of what's missing.
 
-- [ ] **Étape 1 : mesurer sur la cible d'acceptation**
+- [ ] **Step 1: measure on the acceptance target**
 
 ```bash
 cd ~/apps/mycelium
@@ -2134,9 +2134,9 @@ cargo build --release -q
 time ./target/release/kog scan ~/Mastore/mastore-saas -o /tmp/saas-graph.json
 ```
 
-Relever : `files discovered`, `resolution rate`, `nodes`, `edges`, durée.
+Record: `files discovered`, `resolution rate`, `nodes`, `edges`, duration.
 
-- [ ] **Étape 2 : contrôler la gate**
+- [ ] **Step 2: check the gate**
 
 ```bash
 jq -r '.stats | "rate=\(.resolution_rate)  internal=\(.specifiers_internal)  resolved=\(.resolved)  unresolved=\(.unresolved)"' /tmp/saas-graph.json
@@ -2144,28 +2144,28 @@ jq -e '.stats.resolution_rate >= 0.95' /tmp/saas-graph.json >/dev/null \
   && echo "GATE PASSED" || echo "GATE FAILED"
 ```
 
-**Si la gate échoue**, ne pas ajuster le seuil. Extraire les non-résolus et les
-catégoriser avant toute correction :
+**If the gate fails**, do not adjust the threshold. Extract the unresolved specifiers
+and categorize them before any fix:
 
 ```bash
 ./target/release/kog scan ~/Mastore/mastore-saas --stats-only 2>&1 | tail -20
 ```
 
-Les causes attendues, par ordre de probabilité : un alias non pris dans la chaîne
-`extends` ; un `baseUrl` mal appliqué ; une extension manquante dans `EXTENSION_ORDER` ;
-`@prisma/generated` dont la cible n'existe pas sur le disque — celui-ci est légitime et
-ne doit pas être « corrigé ».
+Expected causes, in order of likelihood: an alias not picked up in the `extends`
+chain; a misapplied `baseUrl`; a missing extension in `EXTENSION_ORDER`;
+`@prisma/generated`, whose target doesn't exist on disk — this one is legitimate and
+must not be "fixed".
 
-- [ ] **Étape 3 : vérifier le rendu sur la cible**
+- [ ] **Step 3: verify the rendering on the target**
 
 ```bash
 cp /tmp/saas-graph.json app/public/graph.json
 cd app && bun run dev
 ```
 
-Attendu : le graphe des ~727 fichiers s'affiche et reste fluide au pan et au zoom.
+Expected: the ~727-file graph displays and stays smooth on pan and zoom.
 
-- [ ] **Étape 4 : vérifier la CI**
+- [ ] **Step 4: verify CI**
 
 ```bash
 cd ~/apps/mycelium
@@ -2174,16 +2174,16 @@ cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
 gitleaks detect --no-banner 2>&1 | tail -3
 ```
 
-Attendu : les quatre commandes réussissent.
+Expected: all four commands succeed.
 
-- [ ] **Étape 5 : consigner la mesure**
+- [ ] **Step 5: record the measurement**
 
-Écrire `docs/measurements/2026-08-06-v0-gate.md` avec les chiffres **relevés**, jamais
-estimés : projet, fichiers découverts, fichiers parsés, specifiers total / internes /
-résolus / non résolus, taux, nœuds, arêtes, durée, et la liste catégorisée des non
-résolus. C'est ce document qui rend le chiffre public défendable.
+Write `docs/measurements/2026-08-06-v0-gate.md` with the **recorded** figures, never
+estimated: project, files discovered, files parsed, specifiers total / internal /
+resolved / unresolved, rate, nodes, edges, duration, and the categorized list of
+unresolved specifiers. This document is what makes the public figure defensible.
 
-- [ ] **Étape 6 : commit**
+- [ ] **Step 6: commit**
 
 ```bash
 git add -A && git commit -m "docs: record the v0 acceptance measurement"
@@ -2191,33 +2191,33 @@ git add -A && git commit -m "docs: record the v0 acceptance measurement"
 
 ---
 
-## Auto-revue du plan
+## Plan self-review
 
-**Couverture du spec :**
+**Spec coverage:**
 
-| Section du spec | Tâche |
+| Spec section | Task |
 | --- | --- |
 | §4 architecture, modules | 1–8 |
-| §5 modèle de données | 2 |
-| §6 règles de résolution | 4, 6 |
-| §7 erreurs jamais silencieuses | 4 (tsconfig illisible), 7 (lecture/extraction), 8 (racine absente) |
-| §8 tests par règle | 4, 5, 6, 7 |
-| §9 gate d'acceptation | 10 |
-| §3.3 règle d'entrée d'un langage | 3 (trait), 10 (mesure) |
-| §12 réemploi de dejavu | 1 |
+| §5 data model | 2 |
+| §6 resolution rules | 4, 6 |
+| §7 errors never silent | 4 (unreadable tsconfig), 7 (read/extract), 8 (missing root) |
+| §8 tests per rule | 4, 5, 6, 7 |
+| §9 acceptance gate | 10 |
+| §3.3 a language's entry rule | 3 (trait), 10 (measurement) |
+| §12 reuse from dejavu | 1 |
 
-**Cohérence des types :** `Specifier { raw, line }`, `Resolution::{Internal, External,
-Unresolved}`, `PathMapping { pattern, targets }`, `Stats::resolution_rate()` et le champ
-`resolution_rate` sont employés à l'identique des tâches 2 à 8. `TsConfigIndex::build` et
-`mappings_for` gardent la même signature en tâches 4 et 6. `build_graph(root, &dyn
-Extractor)` est identique en tâches 7 et 8.
+**Type consistency:** `Specifier { raw, line }`, `Resolution::{Internal, External,
+Unresolved}`, `PathMapping { pattern, targets }`, `Stats::resolution_rate()` and the
+`resolution_rate` field are used identically from tasks 2 through 8. `TsConfigIndex::build`
+and `mappings_for` keep the same signature in tasks 4 and 6. `build_graph(root, &dyn
+Extractor)` is identical in tasks 7 and 8.
 
-**Points à surveiller à l'exécution :**
+**Points to watch during execution:**
 
-1. `normalise_public` en tâche 6 est un contournement d'un détail de visibilité. Si
-   l'implémenteur préfère déplacer `normalise` dans un module `path` partagé, c'est une
-   amélioration acceptable.
-2. Les comptes de tests attendus (3, 7, 15, 20, 38, 46) supposent qu'aucun test
-   supplémentaire n'a été ajouté. Un écart n'est pas une erreur ; l'absence d'échec l'est.
-3. Le total de 46 tests reste sous les 51 de dejavu. Si la tâche 10 révèle des trous de
-   résolution, les tests de régression correspondants s'ajoutent en tâche 6.
+1. `normalise_public` in task 6 is a workaround for a visibility detail. If the
+   implementer prefers moving `normalise` into a shared `path` module, that's an
+   acceptable improvement.
+2. The expected test counts (3, 7, 15, 20, 38, 46) assume no additional test was
+   added. A discrepancy isn't an error; a missing failure is.
+3. The total of 46 tests stays under dejavu's 51. If task 10 reveals resolution gaps,
+   the corresponding regression tests get added in task 6.

@@ -20,39 +20,21 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      # The repository is design-first: no Rust code exists yet. Rather than
-      # showing a red badge until the first crate lands, the checks below no-op
-      # until there is a Cargo.toml to check.
-      - name: Probe for a Cargo workspace
-        id: probe
-        run: |
-          if [ -f Cargo.toml ]; then
-            echo "present=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "present=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::No Cargo.toml yet — skipping Rust checks."
-          fi
-
       - name: Install toolchain
-        if: steps.probe.outputs.present == 'true'
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
 
       - name: Cache
-        if: steps.probe.outputs.present == 'true'
         uses: Swatinem/rust-cache@v2
 
       - name: Formatting
-        if: steps.probe.outputs.present == 'true'
         run: cargo fmt --all --check
 
       - name: Lints
-        if: steps.probe.outputs.present == 'true'
         run: cargo clippy --all-targets --all-features
 
       - name: Tests
-        if: steps.probe.outputs.present == 'true'
         run: cargo test --all-features
 
   secrets:
@@ -63,9 +45,11 @@ jobs:
         with:
           fetch-depth: 0
 
-      # This project handles credentials by nature; a leaked fixture would be
-      # the worst possible bug to ship, so the whole history is scanned rather
-      # than a diff.
+      # mycelium itself does not process credentials or personal data (see
+      # .gitleaks.toml) — but an accidentally committed secret (an API key
+      # pasted into a fixture, a token left in a commit message) is still a
+      # real incident for this repository like any other, so the whole
+      # history is scanned rather than a diff.
       #
       # gitleaks is invoked directly instead of through gitleaks-action: the
       # action derives its scan range from the push event, which breaks after

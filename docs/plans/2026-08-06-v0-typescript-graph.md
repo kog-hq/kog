@@ -56,7 +56,7 @@ sigma 3.0.3 · graphology 0.26.0
 
 ---
 
-## Tâche 1 : scaffolding du workspace
+## Task 1 — scaffolding du workspace
 
 **Fichiers :**
 - Créer : `Cargo.toml`, `rust-toolchain.toml`, `.gitignore`, `LICENSE-MIT`,
@@ -196,7 +196,7 @@ git commit -m "chore: set up the cargo workspace and open source scaffolding"
 
 ---
 
-## Tâche 2 : le modèle de graphe
+## Task 2 — le modèle de graphe
 
 **Fichiers :**
 - Créer : `crates/mycelium-graph/src/model.rs`
@@ -370,7 +370,7 @@ git add -A && git commit -m "feat(model): add the language-agnostic graph model"
 
 ---
 
-## Tâche 3 : le trait Extractor
+## Task 3 — le trait Extractor
 
 **Fichiers :**
 - Créer : `crates/mycelium-graph/src/extractor.rs`
@@ -541,7 +541,7 @@ git add -A && git commit -m "feat(extractor): add the language front end trait"
 
 ---
 
-## Tâche 4 : chargement des tsconfig
+## Task 4 — chargement des tsconfig
 
 **Fichiers :**
 - Créer : `crates/mycelium-graph/src/tsconfig.rs`
@@ -937,7 +937,7 @@ git add -A && git commit -m "feat(tsconfig): resolve path aliases across extends
 
 ---
 
-## Tâche 5 : découverte des fichiers
+## Task 5 — découverte des fichiers
 
 **Fichiers :**
 - Créer : `crates/mycelium-graph/src/discover.rs`
@@ -1101,7 +1101,7 @@ git add -A && git commit -m "feat(discover): walk a project for source files"
 
 ---
 
-## Tâche 6 : l'extracteur TypeScript
+## Task 6 — l'extracteur TypeScript
 
 **Fichiers :**
 - Créer : `crates/mycelium-graph/src/extractors/mod.rs`,
@@ -1558,7 +1558,7 @@ git add -A && git commit -m "feat(typescript): extract and resolve import specif
 
 ---
 
-## Tâche 7 : assemblage du graphe
+## Task 7 — assemblage du graphe
 
 **Fichiers :**
 - Créer : `crates/mycelium-graph/src/graph.rs`
@@ -1842,7 +1842,7 @@ git add -A && git commit -m "feat(graph): assemble nodes, edges and resolution s
 
 ---
 
-## Tâche 8 : le CLI
+## Task 8 — le CLI
 
 **Fichiers :**
 - Modifier : `crates/mycelium-cli/src/main.rs`
@@ -1969,7 +1969,7 @@ git add -A && git commit -m "feat(cli): add the scan command"
 
 ---
 
-## Tâche 9 : la page de rendu
+## Task 9 — la page de rendu
 
 **Fichiers :**
 - Créer : `app/package.json`, `app/vite.config.ts`, `app/index.html`,
@@ -2112,7 +2112,7 @@ git add -A && git commit -m "feat(app): render the graph with sigma"
 
 ---
 
-## Tâche 10 : la gate d'acceptation
+## Task 10 — la gate d'acceptation
 
 **Fichiers :**
 - Créer : `docs/measurements/2026-08-06-v0-gate.md`

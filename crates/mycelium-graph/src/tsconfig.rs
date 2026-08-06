@@ -1,3 +1,4 @@
+use crate::build_walker;
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
@@ -55,10 +56,7 @@ impl TsConfigIndex {
     /// it governs falls back to relative-only resolution, and the reason is
     /// recorded in [`TsConfigIndex::skipped`].
     pub fn build(root: &Path) -> Self {
-        let walker = ignore::WalkBuilder::new(root)
-            .hidden(false)
-            .git_ignore(true)
-            .build();
+        let walker = build_walker(root).build();
 
         // Group candidates by directory first: a directory can hold more than
         // one `tsconfig*.json` (e.g. `tsconfig.json` and `tsconfig.build.json`
@@ -648,6 +646,36 @@ mod tests {
         let mappings = index.mappings_for(&dir.path().join("child/src/a.ts"));
         assert!(!mappings.is_empty());
         assert!(mappings.len() < 100);
+    }
+
+    #[test]
+    fn a_tsconfig_inside_node_modules_is_never_indexed() {
+        // Even without a .git directory, node_modules should be excluded.
+        // This proves the ALWAYS_SKIP list is active.
+        let dir = TempDir::new().unwrap();
+        write(
+            &dir,
+            "tsconfig.json",
+            r#"{ "compilerOptions": { "paths": { "@root/*": ["./src/*"] } } }"#,
+        );
+        write(
+            &dir,
+            "node_modules/package/tsconfig.json",
+            r#"{ "compilerOptions": { "paths": { "@pkg/*": ["./lib/*"] } } }"#,
+        );
+        // Note: no .git or .gitignore exists. If ALWAYS_SKIP is not applied,
+        // the node_modules config would be indexed.
+        let index = TsConfigIndex::build(dir.path());
+        // Only the root config should be indexed.
+        let root_mappings = index.mappings_for(&dir.path().join("src/a.ts"));
+        assert_eq!(root_mappings.len(), 1);
+        assert_eq!(root_mappings[0].pattern, "@root/*");
+
+        // Prove that the node_modules config was never discovered at all.
+        assert!(!index
+            .skipped()
+            .iter()
+            .any(|s| s.path.components().any(|c| c.as_os_str() == "node_modules")));
     }
 }
 

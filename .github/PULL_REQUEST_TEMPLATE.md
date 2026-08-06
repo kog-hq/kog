@@ -1,8 +1,3 @@
-<!--
-Never include a real credential in a diff, a fixture or a test. If a change
-touches redaction, say so explicitly below.
--->
-
 ## What and why
 
 <!-- What changes, and what problem it solves. Link the issue if there is one. -->
@@ -17,18 +12,10 @@ touches redaction, say so explicitly below.
 
 <!-- Delete the sections that don't apply. -->
 
-**Adapter** — fixtures added, with the expected normalized `Session` output.
+**Parser / extractor** — tests added for new TypeScript syntax or edge cases.
 
-**Stage-1 scan** — golden tests updated. Report the effect on a real corpus:
-windows detected before and after.
+**Import resolution** — report the effect on a test codebase: resolution accuracy before and after (false positives / false negatives).
 
-**Redaction** — positive cases (the secret is removed) *and* negative cases
-(legitimate high-entropy code survives intact) both added.
+**Graph model** — document schema changes and their impact on queries.
 
-**Distillation prompt** — reject rate on the hand-labelled evaluation set,
-before and after:
-
-| | before | after |
-| --- | --- | --- |
-| accepted | | |
-| rejected | | |
+**Renderer** — include sample output format before and after.

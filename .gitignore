@@ -3,19 +3,14 @@
 **/*.rs.bk
 *.pdb
 
-# Test fixtures may be generated from real transcripts — never commit raw ones.
-# Only anonymized, reviewed fixtures belong in the repo, and they go in
+# Test fixtures generated from real source code — reviewed examples only.
+# Only test cases with expected outputs belong in the repo, in
 # crates/*/tests/fixtures/ explicitly.
 /fixtures-raw/
-*.jsonl.raw
 
 # Local state and config that must never be shared
-/.dejavu/
+/.mycelium/
 config.local.toml
-
-# Tauri (v2)
-/crates/dejavu-app/target/
-/crates/dejavu-app/dist/
 
 # Editors
 .vscode/

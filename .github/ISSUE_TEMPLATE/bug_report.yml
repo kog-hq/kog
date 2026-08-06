@@ -5,9 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        **Never paste a real credential into this form.** mycelium handles secrets
-        by nature — if your report involves one, describe its *shape*
-        (`sk-` + 48 chars) and report it privately instead. See SECURITY.md.
+        Thanks for reporting. Describe what you expected and what you got instead.
 
   - type: textarea
     id: what
@@ -22,32 +20,29 @@ body:
     attributes:
       label: Steps to reproduce
       placeholder: |
-        1. mycelium import
+        1. mycelium scan /path/to/project
         2. ...
     validations:
       required: true
 
   - type: dropdown
-    id: stage
+    id: component
     attributes:
       label: Which part
       options:
-        - Adapter (reading a transcript format)
-        - Stage-1 scan (which windows get detected)
-        - Distillation (note quality)
-        - Deduplication / merging
-        - Vault writing
-        - MCP server / search
-        - Redaction
-        - Not sure
+        - Parser / extractor (reading TypeScript files)
+        - Import resolution (graph construction)
+        - Graph model (data structures)
+        - Renderer (output format)
+        - Other / not sure
     validations:
       required: true
 
   - type: input
-    id: assistant
+    id: version
     attributes:
-      label: Assistant and version
-      placeholder: Claude Code 2.0.x / Codex CLI 0.x
+      label: mycelium version
+      placeholder: 0.1.0
     validations:
       required: true
 
@@ -63,5 +58,5 @@ body:
     id: output
     attributes:
       label: Relevant output
-      description: Output of `mycelium status`, or the error. Scrub it first.
+      description: Error message or unexpected output. Scrub if necessary.
       render: shell

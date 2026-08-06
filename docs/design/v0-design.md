@@ -1,4 +1,4 @@
-# Mycelium — design v0
+# KOG — design v0
 
 - **Date** : 2026-08-06
 - **Statut** : en relecture
@@ -20,7 +20,7 @@ Les outils existants se répartissent en deux camps qui ne se parlent pas :
 | Cartographes | Graphify-Labs/graphify | Comprennent le code, produisent un graphe | Aucun pilotage, mono-projet, export HTML statique |
 | Pilotes | Open Cowork, CloudCLI, agents-ui, OpenHands | Lancent des agents IA | Aucune compréhension du code |
 
-Mycelium vise l'intersection : **voir son code et piloter ses agents dessus, dans la même
+KOG vise l'intersection : **voir son code et piloter ses agents dessus, dans la même
 carte**. La v0 ne traite que la première moitié — et même pas en entier.
 
 ### Référence marché
@@ -63,7 +63,7 @@ ou `AMBIGUOUS`. Pour le code, tout est `EXTRACTED` : déterministe, comme chez n
 total ni par langage. Un import raté ne remonte nulle part — il n'existe pas comme
 échec, il disparaît du graphe.
 
-C'est l'ouverture de Mycelium. Le taux de résolution coûte zéro à produire, se vérifie
+C'est l'ouverture de KOG. Le taux de résolution coûte zéro à produire, se vérifie
 repo par repo, et devient un argument public.
 
 ---
@@ -108,7 +108,7 @@ pas également à tous les langages** :
 
 ### 3.3 Règle d'entrée d'un langage
 
-> **Un langage entre dans Mycelium quand il passe sa propre gate de résolution — pas
+> **Un langage entre dans KOG quand il passe sa propre gate de résolution — pas
 > quand sa grammaire compile.**
 
 Chaque langage supporté affiche son taux. Un langage dont le modèle ne produit pas
@@ -165,16 +165,16 @@ rien, on l'apprend en heures plutôt qu'en jours.
 ## 4. Architecture
 
 ```
-mycelium/
+kog/
 ├── Cargo.toml                 workspace
 ├── crates/
-│   ├── mycelium-graph/        lib — extraction, résolution, assemblage
-│   └── mycelium-cli/          bin — mycelium scan <dir> -o graph.json
+│   ├── kog-graph/        lib — extraction, résolution, assemblage
+│   └── kog-cli/          bin — kog scan <dir> -o graph.json
 ├── app/                       Vite + React + TS + sigma
 └── docs/design/, docs/plans/
 ```
 
-`mycelium-graph`, un module par rôle :
+`kog-graph`, un module par rôle :
 
 | Module | Responsabilité | Dépend de |
 | --- | --- | --- |
@@ -326,9 +326,9 @@ La surface testée est `extractors/typescript.rs`, pas le parcours de fichiers.
 
 La v0 est « terminée » quand, et seulement quand :
 
-1. `mycelium scan` sur le projet monorepo de référence (727 fichiers) affiche un
+1. `kog scan` sur le projet monorepo de référence (727 fichiers) affiche un
    **`resolution_rate` ≥ 0,95**, mesuré et imprimé, jamais estimé.
-2. `mycelium scan` sur un projet simple (93 fichiers, alias `@/*`) produit un graphe
+2. `kog scan` sur un projet simple (93 fichiers, alias `@/*`) produit un graphe
    cohérent.
 3. La page sigma affiche le graphe du monorepo et reste fluide au pan/zoom.
 4. CI verte : `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`, gitleaks.
@@ -374,28 +374,28 @@ graphe de sessions — **après** la v0.
 
 ---
 
-## 13. v0.1 — `mycelium` sans argument
+## 13. v0.1 — `kog` sans argument
 
 Premier retour sur la v0 une fois la gate passée : voir un graphe exigeait trois
-commandes, un clone du dépôt et `bun` — `mycelium scan ~/projet -o
+commandes, un clone du dépôt et `bun` — `kog scan ~/projet -o
 app/public/graph.json`, puis `cd app && bun run dev`. Ça contredit directement le
 différenciateur affiché face au concurrent (§3.7, §11) : « un seul binaire, zéro
 dépendance », alors que le concurrent Python mesuré au §1 a des issues pleines de
 douleur d'installation. Exiger un checkout du dépôt et une chaîne JS pour voir le
-résultat concède exactement ce que mycelium prétend éviter. Cette feature est donc sur
+résultat concède exactement ce que KOG prétend éviter. Cette feature est donc sur
 la trajectoire du projet, pas un confort ajouté.
 
 Décisions :
 
 - `ROOT` a pour valeur par défaut `.` sur `scan` comme sur `view` — taper un chemin
   devient optionnel partout.
-- `mycelium` sans sous-commande équivaut explicitement à `mycelium view .`, câblé dans
+- `kog` sans sous-commande équivaut explicitement à `kog view .`, câblé dans
   le setup clap plutôt que laissé à un comportement implicite.
 - `--stats-only` disparaît : `scan` n'écrit un fichier que si `-o` est donné, plutôt que
   d'écrire par défaut et de proposer un drapeau pour s'en abstenir. Même comportement,
   moins de surface.
 - `view` ne touche jamais le disque : le graphe est gardé en mémoire et servi tel quel.
-  Lancer `mycelium` dans son projet ne doit jamais laisser un `graph.json` derrière soi.
+  Lancer `kog` dans son projet ne doit jamais laisser un `graph.json` derrière soi.
 
 La page (`app/dist`, produite par `bun run build`) est embarquée dans le binaire via
 `rust-embed`, servie par `tiny_http` — synchrone, donc aucun runtime async n'entre dans
@@ -405,7 +405,7 @@ uniquement (c'est la structure du code source de l'utilisateur qui est servie ; 
 port fixe comme 4173/5173, qui pourrait déjà être pris. L'URL est imprimée avant
 l'ouverture du navigateur, pour rester utile en SSH ou si l'ouverture échoue.
 
-`crates/mycelium-cli/build.rs` vérifie que `app/dist/index.html` existe avant de
+`crates/kog-cli/build.rs` vérifie que `app/dist/index.html` existe avant de
 compiler et échoue avec la commande exacte pour le produire (`cd app && bun install &&
 bun run build`) plutôt que de laisser la macro `rust-embed` échouer avec un « file not
 found » qui n'oriente vers rien. Il émet aussi `cargo:rerun-if-changed` sur `app/dist` :

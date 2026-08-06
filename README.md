@@ -1,14 +1,14 @@
-# mycelium
+# KOG
 
 Turns a codebase into a file/import graph. One binary, zero dependencies — no
 JS toolchain, no repo checkout, no server to stand up by hand.
 
 ```
 cd ~/your-project
-mycelium
+kog
 ```
 
-That's it. `mycelium` scans the current directory, holds the graph in
+That's it. `kog` scans the current directory, holds the graph in
 memory, serves it from a page embedded in the binary, and opens your
 browser. Nodes are source files, edges are static imports, laid out with
 ForceAtlas2 and coloured by top-level directory.
@@ -20,22 +20,22 @@ language has to prove to be added.
 ## Install
 
 ```
-git clone https://github.com/bstcoc/mycelium
-cd mycelium
+git clone https://github.com/bstcoc/kog
+cd kog
 just install
 ```
 
-This builds the page, then the CLI that embeds it, then installs `mycelium`
+This builds the page, then the CLI that embeds it, then installs `kog`
 to `~/.cargo/bin`. No `just`? See [`justfile`](justfile) for the two
 commands it runs.
 
 ## Usage
 
 ```
-mycelium                 # scan `.`, serve it, open a browser — the default
-mycelium view ~/other    # explicit form: view a different project
-mycelium scan            # stats to stdout, writes nothing
-mycelium scan -o g.json  # write the graph as JSON instead of serving it
+kog                 # scan `.`, serve it, open a browser — the default
+kog view ~/other    # explicit form: view a different project
+kog scan            # stats to stdout, writes nothing
+kog scan -o g.json  # write the graph as JSON instead of serving it
 ```
 
 `view` never writes a file — nothing is left behind in the project you
@@ -44,15 +44,15 @@ disk with `-o`, or just read the numbers it prints (files parsed, edges
 resolved, resolution rate — see the design doc §5 for the full shape).
 
 The server binds to `127.0.0.1` on an OS-assigned free port and prints the
-URL before opening the browser, so `mycelium` over SSH, or with no browser
+URL before opening the browser, so `kog` over SSH, or with no browser
 available, still tells you where to look.
 
 ## Why this exists
 
-The closest competitor to mycelium is Python, needs a virtualenv, and its
+The closest competitor to KOG is Python, needs a virtualenv, and its
 issue tracker is full of install pain. "One binary, zero dependencies" is
 the whole bet — a feature that requires cloning the renderer and running
-`bun run dev` to see anything would quietly concede that bet. `mycelium`
+`bun run dev` to see anything would quietly concede that bet. `kog`
 alone is the measure of whether the bet is being kept.
 
 ## Development

@@ -1,6 +1,6 @@
 # Security Policy
 
-mycelium reads TypeScript source code and produces a file/import graph. The code you scan
+KOG reads TypeScript source code and produces a file/import graph. The code you scan
 may contain proprietary information, credentials in comments, or other sensitive content.
 Security is a legitimate concern for this project.
 
@@ -29,7 +29,7 @@ commercial SLA — but security issues will be treated as high priority.
 
 ## What is not a vulnerability
 
-- **You must review your own code before scanning**. mycelium reads whatever files
+- **You must review your own code before scanning**. KOG reads whatever files
   you point it to. If you scan a directory containing secrets, those secrets can
   appear in the output. This is your responsibility.
 - **Malformed TypeScript, by itself**. The parser is built on tree-sitter,
@@ -45,4 +45,4 @@ commercial SLA — but security issues will be treated as high priority.
 
 Described in the design document [`docs/design/v0-design.md`](../docs/design/v0-design.md).
 The parser runs locally on your machine. No data is sent anywhere. What you see in the
-output is exactly what mycelium found in your source — no filtering, no external calls.
+output is exactly what KOG found in your source — no filtering, no external calls.

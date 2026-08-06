@@ -1,4 +1,4 @@
-# Contributing to mycelium
+# Contributing to KOG
 
 Thanks for looking. This project is **pre-release**: the v0 gate (design doc §9) has
 just been met, so the most valuable contribution right now is still argument as much
@@ -18,7 +18,7 @@ for you, open an issue and say so — we'll translate it.
 - Changes to the TypeScript parser need tests covering new syntax and edge cases.
 - Changes to import resolution need unit tests showing the effect: synthetic
   fixtures, one per resolution rule, on the model already used throughout
-  `crates/mycelium-graph` (design doc §8) — there is no infrastructure in this
+  `crates/kog-graph` (design doc §8) — there is no infrastructure in this
   repository for golden tests against a real external codebase.
 - Changes to the graph model should document the schema change in
   `docs/design/v0-design.md` §5.

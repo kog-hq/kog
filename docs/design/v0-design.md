@@ -374,6 +374,46 @@ graphe de sessions — **après** la v0.
 
 ---
 
+## 13. v0.1 — `mycelium` sans argument
+
+Premier retour sur la v0 une fois la gate passée : voir un graphe exigeait trois
+commandes, un clone du dépôt et `bun` — `mycelium scan ~/projet -o
+app/public/graph.json`, puis `cd app && bun run dev`. Ça contredit directement le
+différenciateur affiché face au concurrent (§3.7, §11) : « un seul binaire, zéro
+dépendance », alors que le concurrent Python mesuré au §1 a des issues pleines de
+douleur d'installation. Exiger un checkout du dépôt et une chaîne JS pour voir le
+résultat concède exactement ce que mycelium prétend éviter. Cette feature est donc sur
+la trajectoire du projet, pas un confort ajouté.
+
+Décisions :
+
+- `ROOT` a pour valeur par défaut `.` sur `scan` comme sur `view` — taper un chemin
+  devient optionnel partout.
+- `mycelium` sans sous-commande équivaut explicitement à `mycelium view .`, câblé dans
+  le setup clap plutôt que laissé à un comportement implicite.
+- `--stats-only` disparaît : `scan` n'écrit un fichier que si `-o` est donné, plutôt que
+  d'écrire par défaut et de proposer un drapeau pour s'en abstenir. Même comportement,
+  moins de surface.
+- `view` ne touche jamais le disque : le graphe est gardé en mémoire et servi tel quel.
+  Lancer `mycelium` dans son projet ne doit jamais laisser un `graph.json` derrière soi.
+
+La page (`app/dist`, produite par `bun run build`) est embarquée dans le binaire via
+`rust-embed`, servie par `tiny_http` — synchrone, donc aucun runtime async n'entre dans
+le binaire — et le navigateur est ouvert via `open`. Le serveur écoute sur `127.0.0.1`
+uniquement (c'est la structure du code source de l'utilisateur qui est servie ; jamais
+`0.0.0.0`), sur un port choisi par l'OS (bind sur le port 0, lu après coup) plutôt qu'un
+port fixe comme 4173/5173, qui pourrait déjà être pris. L'URL est imprimée avant
+l'ouverture du navigateur, pour rester utile en SSH ou si l'ouverture échoue.
+
+`crates/mycelium-cli/build.rs` vérifie que `app/dist/index.html` existe avant de
+compiler et échoue avec la commande exacte pour le produire (`cd app && bun install &&
+bun run build`) plutôt que de laisser la macro `rust-embed` échouer avec un « file not
+found » qui n'oriente vers rien. Il émet aussi `cargo:rerun-if-changed` sur `app/dist` :
+sans ça, une page reconstruite resterait embarquée obsolète dans le prochain binaire
+compilé — le mode d'échec le plus coûteux à découvrir tard.
+
+---
+
 ## Annexe — environnement de référence
 
 Machine de développement, vérifiée le 2026-08-06 :

@@ -13,9 +13,18 @@ anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 ignore = "0.4"
 jsonc-parser = { version = "0.33", features = ["serde"] }
+open = "5.4"
+# `debug-embed`: embed `app/dist` in every build profile, not just release.
+# Without it, rust-embed resolves `folder` relative to the *current working
+# directory at runtime* in debug builds instead of relative to Cargo.toml —
+# fine for a folder that lives inside the crate, wrong for `app/dist`, which
+# lives two directories up. Debug and release must behave the same way here:
+# `view` never falls back to reading the page live off disk.
+rust-embed = { version = "8.12", features = ["debug-embed"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 streaming-iterator = "0.1"
 thiserror = "2"
+tiny_http = "0.12"
 tree-sitter = "0.26"
 tree-sitter-typescript = "0.23"

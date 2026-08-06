@@ -97,7 +97,20 @@ impl TsConfigIndex {
                     _ => a.file_name().cmp(&b.file_name()),
                 }
             });
-            let winner = &candidates[0];
+            // `by_dir` only ever gains an entry via a push, so every group
+            // has at least one candidate.
+            let (winner, losers) = candidates
+                .split_first()
+                .expect("a directory group is never empty");
+            // Losing siblings never contribute mappings or feed their own
+            // `extends` chain into the index, but a read/parse failure on one
+            // must still be surfaced: otherwise a broken sibling next to a
+            // healthy `tsconfig.json` would disappear without a trace.
+            for loser in losers {
+                if let Some(skip) = Self::validate_config(loser) {
+                    skipped.push(skip);
+                }
+            }
             let mappings = Self::mappings_from_chain(winner, 0, &mut skipped);
             if !mappings.is_empty() {
                 scopes.push((dir, mappings));
@@ -180,6 +193,36 @@ impl TsConfigIndex {
         }
 
         mappings
+    }
+
+    /// Check whether a candidate config can be read and parsed, without
+    /// collecting its mappings or following its `extends` chain.
+    ///
+    /// Used only for configs that lost the same-directory tie-break: their
+    /// content must never enter the index, but a read or parse failure on
+    /// them must still be recorded, or a broken sibling would vanish
+    /// without a trace next to a healthy winner. `None` means the config is
+    /// valid (whether or not it declares any `paths`); that is not a skip.
+    fn validate_config(config_path: &Path) -> Option<SkippedConfig> {
+        let text = match std::fs::read_to_string(config_path) {
+            Ok(t) => t,
+            Err(err) => {
+                return Some(SkippedConfig {
+                    path: config_path.to_path_buf(),
+                    reason: err.to_string(),
+                });
+            }
+        };
+        match jsonc_parser::parse_to_serde_value::<RawTsConfig>(
+            &text,
+            &jsonc_parser::ParseOptions::default(),
+        ) {
+            Ok(_) => None,
+            Err(err) => Some(SkippedConfig {
+                path: config_path.to_path_buf(),
+                reason: err.to_string(),
+            }),
+        }
     }
 
     /// Mappings that apply to a file, nearest enclosing tsconfig first.
@@ -400,6 +443,34 @@ mod tests {
         let index = TsConfigIndex::build(dir.path());
         let mappings = index.mappings_for(&dir.path().join("a.ts"));
         assert_eq!(mappings[0].targets[0], dir.path().join("from-a/*"));
+    }
+
+    #[test]
+    fn a_malformed_sibling_config_is_recorded_without_affecting_the_winner() {
+        let dir = TempDir::new().unwrap();
+        write(
+            &dir,
+            "tsconfig.json",
+            r#"{ "compilerOptions": { "paths": { "@/*": ["./src/*"] } } }"#,
+        );
+        write(&dir, "tsconfig.local.json", "{ this is not json at all ");
+        let index = TsConfigIndex::build(dir.path());
+
+        // 1. The valid config's mapping still resolves through `mappings_for`.
+        let mappings = index.mappings_for(&dir.path().join("a.ts"));
+        assert_eq!(mappings.len(), 1);
+        assert_eq!(mappings[0].targets[0], dir.path().join("src/*"));
+
+        // 2. The malformed sibling appears in `skipped()` with a non-empty reason.
+        assert_eq!(index.skipped().len(), 1);
+        assert_eq!(
+            index.skipped()[0].path,
+            dir.path().join("tsconfig.local.json")
+        );
+        assert!(!index.skipped()[0].reason.is_empty());
+
+        // 3. The malformed sibling contributes no mapping: the only mapping
+        // present is `tsconfig.json`'s own `@/*`, already checked above.
     }
 
     #[test]

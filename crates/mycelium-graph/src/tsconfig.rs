@@ -261,6 +261,11 @@ fn normalise(path: &Path) -> PathBuf {
     out
 }
 
+/// Lexical normalisation, reused by the extractors.
+pub fn normalise_public(path: &Path) -> PathBuf {
+    normalise(path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

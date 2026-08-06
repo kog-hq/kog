@@ -1,5 +1,9 @@
 # KOG v0 — plan d'implémentation
 
+> Le projet s'appelait `mycelium` pendant toute l'exécution de ce plan ; il a été renommé
+> `kog` après la fusion de la v0. Les noms de crates, de binaire et de chemins ont été mis à
+> jour ici pour rester utilisables, mais les instructions d'origine désignaient `mycelium`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal :** parser un projet TypeScript vers un graphe fichiers/imports, l'écrire en
@@ -82,7 +86,7 @@ cp -r ~/apps/dejavu/.github/ISSUE_TEMPLATE .github/
 ```
 
 Relire ensuite chaque fichier copié et remplacer toute occurrence de `dejavu` par
-`kog`. Vérifier :
+`mycelium` — le nom du projet à cette date. Vérifier :
 
 ```bash
 rg -i "dejavu" . --glob '!.git' || echo "aucune occurrence résiduelle"

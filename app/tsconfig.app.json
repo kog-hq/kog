@@ -5,6 +5,8 @@
     "lib": ["ES2023", "DOM"],
     "module": "esnext",
     "types": ["vite/client"],
+    "jsx": "react-jsx",
+    "paths": { "@/*": ["./src/*"] },
     "allowArbitraryExtensions": true,
     "skipLibCheck": true,
 

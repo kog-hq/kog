@@ -28,6 +28,18 @@ jobs:
       - name: Cache
         uses: Swatinem/rust-cache@v2
 
+      # mycelium-cli embeds app/dist into the binary at compile time
+      # (crates/mycelium-cli/build.rs); the page must exist before any
+      # cargo command that touches that crate, including fmt/clippy/test.
+      - name: Install bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Build the page
+        run: |
+          cd app
+          bun install
+          bun run build
+
       - name: Formatting
         run: cargo fmt --all --check
 

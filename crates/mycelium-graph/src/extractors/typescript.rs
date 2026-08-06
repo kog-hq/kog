@@ -261,7 +261,7 @@ impl TypeScriptExtractor {
 
     /// A package's best entry-point candidate.
     ///
-    /// Kora graphs source, not build output — the original design
+    /// Mycelium graphs source, not build output — the original design
     /// ("resolved to its `main`/`exports`, else `index.ts`") is correct for
     /// a runtime resolver but wrong here: on the acceptance target,
     /// `@mastore/shared-types` declares `main` and `exports["."].import`
@@ -740,13 +740,24 @@ export * from "./barrel";"#,
     }
 
     #[test]
-    fn an_asset_import_is_unresolved_and_counted() {
+    fn an_asset_import_that_exists_on_disk_resolves_as_internal() {
+        // The previous version of this test never created `logo.png`, so it
+        // actually exercised "import of a missing file", not "import of an
+        // asset" — its name promised one behaviour and its body tested
+        // another. On a real project the asset exists: `resolve`'s first
+        // rule (`probe`'s exact-file check) finds it and returns `Internal`,
+        // same as any other file on disk. The extractor itself has no
+        // notion of "is this source" — that filtering happens one layer up,
+        // in `build_graph`, where a resolved target outside the extensions
+        // this extractor claims lands in `excluded`, not `unresolved` (see
+        // design doc §6 and `graph::tests` for that half of the behaviour).
         let dir = TempDir::new().unwrap();
         write(&dir, "src/a.ts", "");
+        write(&dir, "src/logo.png", "");
         let e = TypeScriptExtractor::new(dir.path());
         assert_eq!(
             e.resolve("./logo.png", &dir.path().join("src/a.ts")),
-            Resolution::Unresolved
+            Resolution::Internal(dir.path().join("src/logo.png"))
         );
     }
 
@@ -784,7 +795,7 @@ export * from "./barrel";"#,
         // The real shape on the acceptance target: `main` and
         // `exports["."].import` both point at a gitignored `dist/`, while
         // `exports["."].types` points at the real TypeScript source.
-        // Kora graphs source, not build output, so `types` must win.
+        // Mycelium graphs source, not build output, so `types` must win.
         // **Load-bearing**: see the fix report for the break/restore proof.
         let dir = TempDir::new().unwrap();
         write(&dir, "package.json", r#"{ "workspaces": ["packages/*"] }"#);

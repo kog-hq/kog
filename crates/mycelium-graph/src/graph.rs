@@ -327,10 +327,35 @@ import ghost from "./ghost";"#,
 
     #[test]
     fn an_edge_pointing_outside_the_project_is_dropped_and_counted() {
-        let dir = TempDir::new().unwrap();
-        write(&dir, "src/a.ts", r#"import x from "../../outside/x";"#);
-        let graph = build(&dir);
-        assert_eq!(graph.edges.len(), 0);
+        // The original version of this test used a target that did not
+        // exist on disk at all, so `resolve` returned `Unresolved` before
+        // ever reaching the `strip_prefix`-based containment check its name
+        // implies — its sole assertion passed for the wrong reason. Fixed
+        // here to genuinely exercise that branch: a real file, sitting
+        // above the scanned root, reached by a relative import that
+        // actually resolves to it.
+        let outer = TempDir::new().unwrap();
+        write(&outer, "outside/x.ts", "");
+        write(
+            &outer,
+            "project/src/a.ts",
+            r#"import x from "../../outside/x";"#,
+        );
+        let root = outer.path().join("project");
+        let extractor = TypeScriptExtractor::new(&root);
+        let graph = crate::build_graph(&root, &extractor);
+
+        assert_eq!(
+            graph.edges.len(),
+            0,
+            "no edge may point at a node outside the scanned root"
+        );
+        // Not merely dropped: a real file was found, just outside the
+        // scanned root, so it is counted `excluded` — the same treatment as
+        // any other resolved-but-out-of-scope target — never `unresolved`
+        // (the tool did not fail here) and never silently ignored.
+        assert_eq!(graph.stats.excluded, 1);
+        assert_eq!(graph.stats.unresolved, 0);
     }
 
     #[test]

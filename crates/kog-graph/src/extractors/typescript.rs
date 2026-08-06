@@ -61,6 +61,35 @@ impl TypeScriptExtractor {
         }
     }
 
+    /// Strip a Vite-style resource-query suffix (`?url`, `?raw`, …) or
+    /// fragment (`#…`) from a specifier before it is ever probed against the
+    /// filesystem. Vite treats everything from the first `?` as an import
+    /// *modifier*, not part of the path: `./app.css?url` asks Vite to inline
+    /// the file's resolved URL, but the file on disk is still named
+    /// `app.css`. `probe` searches for a file literally named `app.css?url`
+    /// and fails — found on documenso's `apps/remix/app/root.tsx`.
+    ///
+    /// A `#` only starts a fragment from the second character onward: a
+    /// leading `#` names a Node.js subpath import (`#internal/utils`, the
+    /// package.json `imports` field), part of the specifier's identity, not
+    /// a suffix to drop.
+    ///
+    /// Called once, centrally, from the top of [`Self::resolve`] — before
+    /// any resolution rule runs — so every rule benefits, not just relative
+    /// imports: on documenso this also fires through a tsconfig alias
+    /// (`~/app.css?url` via `"~/*": ["./app/*"]`, in
+    /// `apps/remix/app/routes/_internal+/[__htmltopdf]+/audit-log.tsx`), and
+    /// would equally apply to a workspace-package or external specifier
+    /// carrying the same suffix.
+    fn strip_query_suffix(raw: &str) -> &str {
+        for (i, b) in raw.bytes().enumerate() {
+            if b == b'?' || (b == b'#' && i > 0) {
+                return &raw[..i];
+            }
+        }
+        raw
+    }
+
     /// Probe a resolution candidate: exact file, then each extension,
     /// then the directory's index file. Never touches `self` — an
     /// associated function rather than a method so `entry_point` can call
@@ -407,6 +436,11 @@ impl Extractor for TypeScriptExtractor {
     }
 
     fn resolve(&self, raw: &str, importer: &Path) -> Resolution {
+        // Applied once, before any rule below, so every rule benefits — see
+        // `strip_query_suffix`'s doc comment for why this can't live inside
+        // rule 1 alone.
+        let raw = Self::strip_query_suffix(raw);
+
         // 1. Relative.
         if raw.starts_with('.') {
             let base = match importer.parent() {
@@ -619,6 +653,83 @@ export * from "./barrel";"#,
         let e = TypeScriptExtractor::new(dir.path());
         let got = e.resolve("./b.js", &dir.path().join("src/a.ts"));
         assert_eq!(got, Resolution::Internal(dir.path().join("src/b.ts")));
+    }
+
+    // --- Vite-style query/fragment suffix (public-repo finding: documenso) ---
+
+    #[test]
+    fn a_vite_url_query_suffix_is_stripped_before_probing() {
+        // `./app.css?url` asks Vite to inline the file's resolved URL; the
+        // file on disk is still named `app.css`. Found on documenso
+        // (`apps/remix/app/root.tsx`), where the unstripped specifier
+        // probed for a file literally named `app.css?url` and failed.
+        let dir = TempDir::new().unwrap();
+        write(&dir, "src/a.tsx", "");
+        write(&dir, "src/app.css", "");
+        let e = TypeScriptExtractor::new(dir.path());
+        let got = e.resolve("./app.css?url", &dir.path().join("src/a.tsx"));
+        assert_eq!(got, Resolution::Internal(dir.path().join("src/app.css")));
+    }
+
+    #[test]
+    fn a_vite_raw_query_suffix_is_stripped_too() {
+        // Same modifier class, different value: `?raw` imports the file's
+        // text content. Any `?…` suffix is a Vite import modifier, not part
+        // of the path, regardless of which word follows the `?`.
+        let dir = TempDir::new().unwrap();
+        write(&dir, "src/a.ts", "");
+        write(&dir, "src/mod.ts", "");
+        let e = TypeScriptExtractor::new(dir.path());
+        let got = e.resolve("./mod.ts?raw", &dir.path().join("src/a.ts"));
+        assert_eq!(got, Resolution::Internal(dir.path().join("src/mod.ts")));
+    }
+
+    #[test]
+    fn a_specifier_with_no_query_is_left_untouched() {
+        assert_eq!(TypeScriptExtractor::strip_query_suffix("./b"), "./b");
+        assert_eq!(
+            TypeScriptExtractor::strip_query_suffix("@tanstack/react-query"),
+            "@tanstack/react-query"
+        );
+    }
+
+    #[test]
+    fn a_fragment_suffix_is_also_stripped() {
+        assert_eq!(
+            TypeScriptExtractor::strip_query_suffix("./worker.ts#worker"),
+            "./worker.ts"
+        );
+    }
+
+    #[test]
+    fn a_leading_hash_is_kept_it_names_a_node_subpath_import() {
+        // `#internal/utils` (Node.js subpath imports, package.json `imports`
+        // field) starts with `#` — that is not a fragment to strip, it is
+        // the specifier's first character and part of its identity.
+        assert_eq!(
+            TypeScriptExtractor::strip_query_suffix("#internal/utils"),
+            "#internal/utils"
+        );
+    }
+
+    #[test]
+    fn a_query_suffix_is_stripped_before_a_tsconfig_alias_too() {
+        // Not just relative imports: documenso's `apps/remix/app/routes/…`
+        // hits this exact shape, `~/app.css?url` through a `"~/*":
+        // ["./app/*"]` mapping — proving the strip has to happen centrally,
+        // before every resolution rule, not bolted onto rule 1 alone.
+        let dir = TempDir::new().unwrap();
+        write(
+            &dir,
+            "tsconfig.json",
+            r#"{ "compilerOptions": { "paths": { "~/*": ["./app/*"] } } }"#,
+        );
+        write(&dir, "app/routes/a.tsx", "");
+        write(&dir, "app/app.css", "");
+        let e = TypeScriptExtractor::new(dir.path());
+        let root = canonical(&dir);
+        let got = e.resolve("~/app.css?url", &root.join("app/routes/a.tsx"));
+        assert_eq!(got, Resolution::Internal(root.join("app/app.css")));
     }
 
     #[test]

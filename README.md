@@ -1,82 +1,163 @@
-<img src="assets/logo.svg" alt="" width="72" align="left" hspace="12" vspace="4">
+<p align="center">
+  <a href="https://github.com/kog-hq/kog">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="./assets/logo-dark.svg" />
+      <source media="(prefers-color-scheme: light)" srcset="./assets/logo.svg" />
+      <img src="./assets/logo.svg" width="100px" alt="KOG logo" />
+    </picture>
+  </a>
+</p>
 
-# KOG
+<h2 align="center">Every tool draws your codebase. KOG tells you what it missed.</h2>
 
-**K**nowledge **O**rchestration **G**raph
+<p align="center"><a href="./docs/design/v0-design.md"><img src="./assets/icons/book.svg" width="12" height="12"/> Design</a> · <a href="./ROADMAP.md"><img src="./assets/icons/map.svg" width="12" height="12"/> Roadmap</a> · <a href="./docs/measurements/"><img src="./assets/icons/star.svg" width="12" height="12"/> Measurements</a></p>
 
-<br clear="left">
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="./assets/cover-dark.svg" />
+    <source media="(prefers-color-scheme: light)" srcset="./assets/cover-light.svg" />
+    <img src="./assets/cover-light.svg" alt="KOG banner" />
+  </picture>
+</p>
 
-Turns a codebase into a file/import graph. One binary, zero dependencies — no
-JS toolchain, no repo checkout, no server to stand up by hand.
+<br />
 
+> [!NOTE]
+> **v0.** TypeScript only, file-level granularity. The graph is a proof of the pipeline,
+> not an interface yet — no search, no filters, no clustering. What is finished is the
+> part that has to be right: the resolution, and the number that reports it.
+
+<br />
+
+# Why KOG
+
+A dependency graph is easy to draw and easy to get wrong, and a wrong one is worse than
+none — it looks authoritative while quietly omitting edges.
+
+Take the most-depended-upon file in [documenso](https://github.com/documenso/documenso),
+`packages/prisma/index.ts`. Ask an agent, or yourself, *what depends on this?* The obvious
+move is to grep for its path:
+
+```bash
+rg -l "packages/prisma/index" -g '*.ts' -g '*.tsx'   # 0 files
+rg -l "@documenso/prisma"     -g '*.ts' -g '*.tsx'   # 476 files
 ```
-cd ~/your-project
-kog
-```
 
-That's it. `kog` scans the current directory, holds the graph in
-memory, serves it from a page embedded in the binary, and opens your
-browser. Nodes are source files, edges are static imports, laid out with
-ForceAtlas2 and coloured by top-level directory.
+Not one import names the path. All 476 go through the workspace package name, and grep
+cannot connect the two. The graph finds 484 edges into that file; the obvious answer finds
+none, and nothing says so.
 
-TypeScript/TSX is the only language supported in v0 — see
-[`docs/design/v0-design.md`](docs/design/v0-design.md) for why, and what a
-language has to prove to be added.
+Resolving it means reading the root `package.json` `workspaces`, finding the package that
+declares that name, and following its `types` entry to source rather than its `main` entry
+into `dist/`.
 
-## Install
+KOG does that, along with `tsconfig` `paths` across `extends` chains — and then reports,
+specifier by specifier, everything it still could not resolve.
 
-```
+<br />
+
+# Installation
+
+### <img src="./assets/icons/rocket.svg" width="14" height="14"/> Build and install
+
+```bash
 git clone https://github.com/kog-hq/kog
 cd kog
 just install
 ```
 
-This builds the page, then the CLI that embeds it, then installs `kog`
-to `~/.cargo/bin`. No `just`? See [`justfile`](justfile) for the two
-commands it runs.
+Builds the page, then the CLI that embeds it, then installs `kog` to `~/.cargo/bin`.
+No `just`? The [`justfile`](justfile) shows the two commands it runs.
 
-## Usage
+### <img src="./assets/icons/code.svg" width="14" height="14"/> Run it
 
-```
-kog                 # scan `.`, serve it, open a browser — the default
-kog view ~/other    # explicit form: view a different project
-kog scan            # stats to stdout, writes nothing
-kog scan -o g.json  # write the graph as JSON instead of serving it
+```bash
+cd ~/your-project
+kog
 ```
 
-`view` never writes a file — nothing is left behind in the project you
-pointed it at. `scan` is the non-visual path: pipe its output, write it to
-disk with `-o`, or just read the numbers it prints (files parsed, edges
-resolved, resolution rate — see the design doc §5 for the full shape).
+Scans the current directory, serves the graph from a page embedded in the binary, opens
+your browser. Nothing is written to your project.
 
-The server binds to `127.0.0.1` on an OS-assigned free port and prints the
-URL before opening the browser, so `kog` over SSH, or with no browser
-available, still tells you where to look.
-
-## Why this exists
-
-The closest competitor to KOG is Python, needs a virtualenv, and its
-issue tracker is full of install pain. "One binary, zero dependencies" is
-the whole bet — a feature that requires cloning the renderer and running
-`bun run dev` to see anything would quietly concede that bet. `kog`
-alone is the measure of whether the bet is being kept.
-
-## Development
-
-This project is pre-release; see
-[`.github/CONTRIBUTING.md`](.github/CONTRIBUTING.md) for the current state
-and how to contribute. The design rationale — what's in v0, what's
-deliberately out, and the measurements behind each call — lives in
-[`docs/design/v0-design.md`](docs/design/v0-design.md).
-
-```
-just build    # build the page, then the release binary
-just test     # cargo test --workspace
-just lint     # cargo fmt --check + cargo clippy -D warnings
-just dev      # Vite dev server for app/, for iterating on the page itself
+```bash
+kog view ~/other      # view a different project
+kog scan              # stats to stdout, writes nothing
+kog scan -o g.json    # write the graph as JSON
 ```
 
-## License
+The server binds to `127.0.0.1` on an OS-assigned port and prints the URL before opening
+anything, so `kog` over SSH still tells you where to look.
 
-Dual-licensed under [MIT](LICENSE-MIT) or [Apache 2.0](LICENSE-APACHE), at
-your option.
+<br />
+
+# The number, and how to check it
+
+Every scan reports a resolution rate. Externals leave the denominator — `import react` has
+no file to point at. So do **excluded** specifiers: those resolved to a real path outside
+the scanned set, which is a policy decision, not a parser failure.
+
+```
+resolution rate = resolved / (internal − excluded)
+```
+
+Measured on two public repositories, at a commit you can check out yourself:
+
+| Repository | Files | Internal | Resolved | Unresolved | Rate |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| [documenso/documenso](https://github.com/documenso/documenso) | 2,073 | 10,346 | 10,101 | 229 | **0.9778** |
+| [TanStack/query](https://github.com/TanStack/query) | 1,027 | 1,588 | 1,462 | 8 | **0.9946** |
+
+The remainder is not hidden. Every specifier that did not become an edge is listed in
+`stats.diagnostics` with its file, its line and its category — on documenso, 225 of the 229
+are imports into code that `prisma generate` and `react-router typegen` produce, absent from
+a fresh clone. Run those generators and they resolve.
+
+Reproduce it:
+
+```bash
+git clone --depth 1 https://github.com/documenso/documenso
+kog scan documenso
+```
+
+Full breakdown, with the raw output and every gap categorised, in
+[`docs/measurements/`](docs/measurements/).
+
+<br />
+
+# <img src="./assets/icons/shield.svg" width="20" height="20"/> What it does not do
+
+Stated plainly, because a tool that only advertises its strengths is not measuring anything.
+
+- **One language.** TypeScript and TSX. Go is next, and it will publish its own rate — a
+  language ships when it passes its own gate, not when its grammar compiles.
+- **Files, not symbols.** Nodes are files, edges are static imports. Call graphs need a type
+  checker to be right, and a wrong call graph is worse than a coarse import graph.
+- **No dynamic `import()`**, no `require()`.
+- **The renderer is a prototype.** It proves 2,000 nodes render and stay interactive. It is
+  not an interface.
+- **Two repositories is not a corpus.** The rates above are two data points, both TypeScript.
+
+<br />
+
+# Stack
+
+Rust, [tree-sitter](https://tree-sitter.github.io) for parsing, no LLM anywhere in the
+pipeline — resolution is deterministic or it is not reported. The page is
+[sigma.js](https://www.sigmajs.org) and [graphology](https://graphology.github.io) on WebGL,
+built with Vite and embedded in the binary at compile time.
+
+<br />
+
+# Project status
+
+v0 is complete and measured. [`ROADMAP.md`](ROADMAP.md) has the order: recording *why* each
+specifier was excluded, then Go, then an MCP server so an agent can ask the graph questions
+instead of grepping, then a desktop shell.
+
+Contributions welcome — [`.github/CONTRIBUTING.md`](.github/CONTRIBUTING.md).
+
+<br />
+
+# License
+
+Dual-licensed under [MIT](LICENSE-MIT) or [Apache 2.0](LICENSE-APACHE), at your option.

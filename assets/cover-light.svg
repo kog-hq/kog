@@ -1,0 +1,67 @@
+<svg width="1200" height="380" viewBox="0 0 1200 380" fill="none" xmlns="http://www.w3.org/2000/svg" font-family="ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <defs>
+    <pattern id="d-grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M32 0H0V32" stroke="#F0F1F5" stroke-width="1" fill="none"/>
+    </pattern>
+    <radialGradient id="d-glow" cx="0.5" cy="0.5" r="0.5">
+      <stop stop-color="#E0457B" stop-opacity="0.13"/>
+      <stop offset="1" stop-color="#E0457B" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="d-glow2" cx="0.5" cy="0.5" r="0.5">
+      <stop stop-color="#4A90D9" stop-opacity="0.11"/>
+      <stop offset="1" stop-color="#4A90D9" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="d-wash" x1="0" y1="0" x2="1200" y2="380" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F8F9FB"/><stop offset="0.55" stop-color="#FFFFFF"/><stop offset="1" stop-color="#FAFAFC"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="380" fill="#FFFFFF"/>
+  <rect width="1200" height="380" fill="url(#d-wash)"/>
+  <ellipse cx="880" cy="150" rx="300" ry="220" fill="url(#d-glow)"/>
+  <ellipse cx="960" cy="290" rx="240" ry="180" fill="url(#d-glow2)"/>
+
+  <!-- Left: mark, wordmark, line. -->
+  <g transform="translate(96 96)">
+    <g stroke="#111318" stroke-width="2.4" stroke-linecap="round" opacity="0.5">
+      <path d="M28 28 46.4 28"/><path d="M28 28 41 41"/><path d="M28 28 28 46.4"/><path d="M28 28 15 41"/>
+      <path d="M28 28 9.6 28"/><path d="M28 28 15 15"/><path d="M28 28 28 9.6"/><path d="M28 28 41 15"/>
+    </g>
+    <g fill="#111318">
+      <circle cx="46.4" cy="28" r="4"/><circle cx="41" cy="41" r="4"/><circle cx="28" cy="46.4" r="4"/><circle cx="15" cy="41" r="4"/>
+      <circle cx="9.6" cy="28" r="4"/><circle cx="15" cy="15" r="4"/><circle cx="28" cy="9.6" r="4"/><circle cx="41" cy="15" r="4"/>
+    </g>
+    <circle cx="28" cy="28" r="8.3" fill="#111318"/>
+    <text x="76" y="40" fill="#111318" font-size="42" font-weight="700" letter-spacing="2">KOG</text>
+  </g>
+
+  <text x="96" y="212" fill="#111318" font-size="27" font-weight="600">Turn your codebase into an interactive graph.</text>
+  <text x="96" y="250" fill="#5C606B" font-size="19">One binary. And a resolution rate you can audit.</text>
+
+  <g transform="translate(96 292)" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15">
+    <rect x="-14" y="-24" width="330" height="56" rx="9" fill="#F6F7F9" stroke="#DDE0E6"/>
+    <text x="4" y="-2" fill="#8A8E99">$</text>
+    <text x="24" y="-2" fill="#111318">cd ~/your-project &amp;&amp; kog</text>
+    <text x="4" y="20" fill="#8A8E99">2073 nodes · 9970 edges · 0.9775</text>
+  </g>
+
+  <!-- Right: what the tool actually draws — two clusters joined by one hub. -->
+  <g transform="translate(700 40)" opacity="0.92">
+    <g stroke="#B6B9C2" stroke-width="1.5" opacity="0.75">
+      <path d="M250 150 150 70"/><path d="M250 150 205 48"/><path d="M250 150 288 44"/><path d="M250 150 350 66"/><path d="M250 150 372 122"/>
+      <path d="M250 150 148 232"/><path d="M250 150 196 268"/><path d="M250 150 268 282"/><path d="M250 150 344 254"/><path d="M250 150 128 176"/>
+      <path d="M150 70 205 48"/><path d="M205 48 288 44"/><path d="M288 44 350 66"/><path d="M350 66 372 122"/>
+      <path d="M148 232 196 268"/><path d="M196 268 268 282"/><path d="M268 282 344 254"/><path d="M128 176 148 232"/>
+    </g>
+    <g fill="#E0457B">
+      <circle cx="150" cy="70" r="9"/><circle cx="205" cy="48" r="7"/><circle cx="288" cy="44" r="10"/>
+      <circle cx="350" cy="66" r="7"/><circle cx="372" cy="122" r="8"/><circle cx="128" cy="176" r="6"/>
+      <circle cx="240" cy="88" r="5"/><circle cx="320" cy="104" r="5"/><circle cx="178" cy="118" r="5"/>
+    </g>
+    <g fill="#4A90D9">
+      <circle cx="148" cy="232" r="8"/><circle cx="196" cy="268" r="7"/><circle cx="268" cy="282" r="10"/>
+      <circle cx="344" cy="254" r="7"/><circle cx="222" cy="214" r="5"/><circle cx="308" cy="212" r="5"/>
+    </g>
+    <circle cx="250" cy="150" r="19" fill="#111318"/>
+  </g>
+</svg>

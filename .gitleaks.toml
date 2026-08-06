@@ -1,4 +1,4 @@
-# gitleaks configuration for mycelium.
+# gitleaks configuration for KOG.
 #
 # This project parses TypeScript codebases into file/import graphs.
 # It does not process credentials or personal data, so gitleaks runs

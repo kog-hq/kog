@@ -1,13 +1,17 @@
-# Mycelium v0 — plan d'implémentation
+# KOG v0 — plan d'implémentation
+
+> Le projet s'appelait `mycelium` pendant toute l'exécution de ce plan ; il a été renommé
+> `kog` après la fusion de la v0. Les noms de crates, de binaire et de chemins ont été mis à
+> jour ici pour rester utilisables, mais les instructions d'origine désignaient `mycelium`.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal :** parser un projet TypeScript vers un graphe fichiers/imports, l'écrire en
 `graph.json` avec son taux de résolution mesuré, et l'afficher en WebGL.
 
-**Architecture :** un workspace Rust à deux crates. `mycelium-graph` expose un trait
+**Architecture :** un workspace Rust à deux crates. `kog-graph` expose un trait
 `Extractor` et une unique implémentation TypeScript (tree-sitter + tsconfig) ;
-`mycelium-cli` orchestre parcours, extraction, résolution et sérialisation. Une page
+`kog-cli` orchestre parcours, extraction, résolution et sérialisation. Une page
 Vite+sigma consomme le JSON. Aucune couche Tauri en v0.
 
 **Tech stack :** Rust 2021 · tree-sitter 0.26.11 · tree-sitter-typescript 0.23.2 ·
@@ -44,14 +48,14 @@ sigma 3.0.3 · graphology 0.26.0
 
 | Fichier | Responsabilité |
 | --- | --- |
-| `crates/mycelium-graph/src/model.rs` | `Graph`, `Node`, `Edge`, `Stats`, `Failure`. Serde. Agnostique du langage, zéro logique |
-| `crates/mycelium-graph/src/extractor.rs` | Trait `Extractor`, `Specifier`, `Resolution`, `ExtractError` |
-| `crates/mycelium-graph/src/tsconfig.rs` | Chargement JSONC, chaîne `extends`, index de mappings par répertoire |
-| `crates/mycelium-graph/src/extractors/typescript.rs` | Grammaire tree-sitter, requête d'imports, règles de résolution TS |
-| `crates/mycelium-graph/src/discover.rs` | Parcours respectant `.gitignore`, filtrage par extensions |
-| `crates/mycelium-graph/src/graph.rs` | Assemblage, déduplication, statistiques |
-| `crates/mycelium-graph/src/lib.rs` | Réexports publics |
-| `crates/mycelium-cli/src/main.rs` | CLI clap, orchestration, sortie JSON et résumé |
+| `crates/kog-graph/src/model.rs` | `Graph`, `Node`, `Edge`, `Stats`, `Failure`. Serde. Agnostique du langage, zéro logique |
+| `crates/kog-graph/src/extractor.rs` | Trait `Extractor`, `Specifier`, `Resolution`, `ExtractError` |
+| `crates/kog-graph/src/tsconfig.rs` | Chargement JSONC, chaîne `extends`, index de mappings par répertoire |
+| `crates/kog-graph/src/extractors/typescript.rs` | Grammaire tree-sitter, requête d'imports, règles de résolution TS |
+| `crates/kog-graph/src/discover.rs` | Parcours respectant `.gitignore`, filtrage par extensions |
+| `crates/kog-graph/src/graph.rs` | Assemblage, déduplication, statistiques |
+| `crates/kog-graph/src/lib.rs` | Réexports publics |
+| `crates/kog-cli/src/main.rs` | CLI clap, orchestration, sortie JSON et résumé |
 | `app/src/main.tsx` | Chargement `graph.json`, graphology, sigma |
 
 ---
@@ -61,12 +65,12 @@ sigma 3.0.3 · graphology 0.26.0
 **Fichiers :**
 - Créer : `Cargo.toml`, `rust-toolchain.toml`, `.gitignore`, `LICENSE-MIT`,
   `LICENSE-APACHE`, `.gitleaks.toml`, `.github/workflows/ci.yml`,
-  `crates/mycelium-graph/Cargo.toml`, `crates/mycelium-graph/src/lib.rs`,
-  `crates/mycelium-cli/Cargo.toml`, `crates/mycelium-cli/src/main.rs`
+  `crates/kog-graph/Cargo.toml`, `crates/kog-graph/src/lib.rs`,
+  `crates/kog-cli/Cargo.toml`, `crates/kog-cli/src/main.rs`
 
 **Interfaces :**
 - Consomme : rien.
-- Produit : un workspace qui compile, `mycelium` en binaire.
+- Produit : un workspace qui compile, `kog` en binaire.
 
 - [ ] **Étape 1 : récupérer le scaffolding réutilisable de dejavu**
 
@@ -82,7 +86,7 @@ cp -r ~/apps/dejavu/.github/ISSUE_TEMPLATE .github/
 ```
 
 Relire ensuite chaque fichier copié et remplacer toute occurrence de `dejavu` par
-`mycelium`. Vérifier :
+`mycelium` — le nom du projet à cette date. Vérifier :
 
 ```bash
 rg -i "dejavu" . --glob '!.git' || echo "aucune occurrence résiduelle"
@@ -95,13 +99,13 @@ rg -i "dejavu" . --glob '!.git' || echo "aucune occurrence résiduelle"
 ```toml
 [workspace]
 resolver = "2"
-members = ["crates/mycelium-graph", "crates/mycelium-cli"]
+members = ["crates/kog-graph", "crates/kog-cli"]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/bstcoc/mycelium"
+repository = "https://github.com/bstcoc/kog"
 
 [workspace.dependencies]
 anyhow = "1"
@@ -115,11 +119,11 @@ tree-sitter = "0.26"
 tree-sitter-typescript = "0.23"
 ```
 
-`crates/mycelium-graph/Cargo.toml` :
+`crates/kog-graph/Cargo.toml` :
 
 ```toml
 [package]
-name = "mycelium-graph"
+name = "kog-graph"
 description = "Turns a codebase into a file/import graph"
 version.workspace = true
 edition.workspace = true
@@ -140,41 +144,41 @@ tree-sitter-typescript.workspace = true
 tempfile = "3"
 ```
 
-`crates/mycelium-cli/Cargo.toml` :
+`crates/kog-cli/Cargo.toml` :
 
 ```toml
 [package]
-name = "mycelium-cli"
-description = "Command line interface for mycelium"
+name = "kog-cli"
+description = "Command line interface for kog"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
 [[bin]]
-name = "mycelium"
+name = "kog"
 path = "src/main.rs"
 
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
-mycelium-graph = { path = "../mycelium-graph" }
+kog-graph = { path = "../kog-graph" }
 serde_json.workspace = true
 ```
 
 - [ ] **Étape 3 : squelettes de sources**
 
-`crates/mycelium-graph/src/lib.rs` :
+`crates/kog-graph/src/lib.rs` :
 
 ```rust
 //! Turns a codebase into a file/import graph.
 ```
 
-`crates/mycelium-cli/src/main.rs` :
+`crates/kog-cli/src/main.rs` :
 
 ```rust
 fn main() {
-    println!("mycelium");
+    println!("kog");
 }
 ```
 
@@ -199,8 +203,8 @@ git commit -m "chore: set up the cargo workspace and open source scaffolding"
 ## Task 2 — le modèle de graphe
 
 **Fichiers :**
-- Créer : `crates/mycelium-graph/src/model.rs`
-- Modifier : `crates/mycelium-graph/src/lib.rs`
+- Créer : `crates/kog-graph/src/model.rs`
+- Modifier : `crates/kog-graph/src/lib.rs`
 
 **Interfaces :**
 - Consomme : rien.
@@ -210,7 +214,7 @@ git commit -m "chore: set up the cargo workspace and open source scaffolding"
 
 - [ ] **Étape 1 : écrire le test qui échoue**
 
-`crates/mycelium-graph/src/model.rs`, en fin de fichier :
+`crates/kog-graph/src/model.rs`, en fin de fichier :
 
 ```rust
 #[cfg(test)]
@@ -262,14 +266,14 @@ mod tests {
 
 ```bash
 export PATH="$HOME/.cargo/bin:$PATH"
-cargo test -p mycelium-graph 2>&1 | tail -15
+cargo test -p kog-graph 2>&1 | tail -15
 ```
 
 Attendu : erreurs de compilation, `cannot find type Stats`, `Graph`, `Node`, `Edge`.
 
 - [ ] **Étape 3 : écrire l'implémentation minimale**
 
-En tête de `crates/mycelium-graph/src/model.rs` :
+En tête de `crates/kog-graph/src/model.rs` :
 
 ```rust
 use serde::{Deserialize, Serialize};
@@ -356,7 +360,7 @@ pub use model::{Edge, EdgeKind, Failure, Graph, Node, Stats};
 - [ ] **Étape 4 : lancer les tests et vérifier qu'ils passent**
 
 ```bash
-cargo test -p mycelium-graph 2>&1 | tail -8
+cargo test -p kog-graph 2>&1 | tail -8
 ```
 
 Attendu : `test result: ok. 3 passed`.
@@ -373,8 +377,8 @@ git add -A && git commit -m "feat(model): add the language-agnostic graph model"
 ## Task 3 — le trait Extractor
 
 **Fichiers :**
-- Créer : `crates/mycelium-graph/src/extractor.rs`
-- Modifier : `crates/mycelium-graph/src/lib.rs`
+- Créer : `crates/kog-graph/src/extractor.rs`
+- Modifier : `crates/kog-graph/src/lib.rs`
 
 **Interfaces :**
 - Consomme : rien du modèle.
@@ -384,7 +388,7 @@ git add -A && git commit -m "feat(model): add the language-agnostic graph model"
 
 - [ ] **Étape 1 : écrire le test qui échoue**
 
-En fin de `crates/mycelium-graph/src/extractor.rs` :
+En fin de `crates/kog-graph/src/extractor.rs` :
 
 ```rust
 #[cfg(test)]
@@ -454,14 +458,14 @@ mod tests {
 - [ ] **Étape 2 : lancer le test et vérifier qu'il échoue**
 
 ```bash
-cargo test -p mycelium-graph extractor 2>&1 | tail -12
+cargo test -p kog-graph extractor 2>&1 | tail -12
 ```
 
 Attendu : `cannot find trait Extractor`.
 
 - [ ] **Étape 3 : écrire l'implémentation minimale**
 
-En tête de `crates/mycelium-graph/src/extractor.rs` :
+En tête de `crates/kog-graph/src/extractor.rs` :
 
 ```rust
 use std::path::{Path, PathBuf};
@@ -514,7 +518,7 @@ pub trait Extractor {
 ```
 
 Ajouter `thiserror = "2"` aux `workspace.dependencies` du `Cargo.toml` racine et
-`thiserror.workspace = true` aux dépendances de `mycelium-graph`.
+`thiserror.workspace = true` aux dépendances de `kog-graph`.
 
 Dans `lib.rs` :
 
@@ -527,7 +531,7 @@ pub use extractor::{ExtractError, Extractor, Resolution, Specifier};
 - [ ] **Étape 4 : lancer les tests et vérifier qu'ils passent**
 
 ```bash
-cargo test -p mycelium-graph 2>&1 | tail -8
+cargo test -p kog-graph 2>&1 | tail -8
 ```
 
 Attendu : `test result: ok. 7 passed`.
@@ -544,8 +548,8 @@ git add -A && git commit -m "feat(extractor): add the language front end trait"
 ## Task 4 — chargement des tsconfig
 
 **Fichiers :**
-- Créer : `crates/mycelium-graph/src/tsconfig.rs`
-- Modifier : `crates/mycelium-graph/src/lib.rs`
+- Créer : `crates/kog-graph/src/tsconfig.rs`
+- Modifier : `crates/kog-graph/src/lib.rs`
 
 **Interfaces :**
 - Consomme : rien.
@@ -561,7 +565,7 @@ d'acceptation : 2 651 des 3 209 imports internes passent par un alias. Sans cett
 
 - [ ] **Étape 1 : écrire le test qui échoue**
 
-En fin de `crates/mycelium-graph/src/tsconfig.rs` :
+En fin de `crates/kog-graph/src/tsconfig.rs` :
 
 ```rust
 #[cfg(test)]
@@ -708,14 +712,14 @@ mod tests {
 - [ ] **Étape 2 : lancer le test et vérifier qu'il échoue**
 
 ```bash
-cargo test -p mycelium-graph tsconfig 2>&1 | tail -12
+cargo test -p kog-graph tsconfig 2>&1 | tail -12
 ```
 
 Attendu : `cannot find type TsConfigIndex`.
 
 - [ ] **Étape 3 : écrire l'implémentation minimale**
 
-En tête de `crates/mycelium-graph/src/tsconfig.rs` :
+En tête de `crates/kog-graph/src/tsconfig.rs` :
 
 ```rust
 use serde::Deserialize;
@@ -884,7 +888,7 @@ pub use tsconfig::{PathMapping, TsConfigIndex};
 - [ ] **Étape 4 : lancer les tests et vérifier qu'ils passent**
 
 ```bash
-cargo test -p mycelium-graph 2>&1 | tail -8
+cargo test -p kog-graph 2>&1 | tail -8
 ```
 
 Attendu : `test result: ok. 15 passed`.
@@ -892,7 +896,7 @@ Attendu : `test result: ok. 15 passed`.
 - [ ] **Étape 5 : vérifier contre les vrais tsconfig de la cible**
 
 ```bash
-cat >> crates/mycelium-graph/src/tsconfig.rs <<'RUST'
+cat >> crates/kog-graph/src/tsconfig.rs <<'RUST'
 
 #[cfg(test)]
 mod real_project_tests {
@@ -922,7 +926,7 @@ mod real_project_tests {
     }
 }
 RUST
-cargo test -p mycelium-graph -- --ignored 2>&1 | tail -8
+cargo test -p kog-graph -- --ignored 2>&1 | tail -8
 ```
 
 Attendu : `test result: ok. 1 passed`. Si ce test échoue, la gate de la tâche 10 ne peut
@@ -940,8 +944,8 @@ git add -A && git commit -m "feat(tsconfig): resolve path aliases across extends
 ## Task 5 — découverte des fichiers
 
 **Fichiers :**
-- Créer : `crates/mycelium-graph/src/discover.rs`
-- Modifier : `crates/mycelium-graph/src/lib.rs`
+- Créer : `crates/kog-graph/src/discover.rs`
+- Modifier : `crates/kog-graph/src/lib.rs`
 
 **Interfaces :**
 - Consomme : `Extractor::extensions()` de la tâche 3.
@@ -950,7 +954,7 @@ git add -A && git commit -m "feat(tsconfig): resolve path aliases across extends
 
 - [ ] **Étape 1 : écrire le test qui échoue**
 
-En fin de `crates/mycelium-graph/src/discover.rs` :
+En fin de `crates/kog-graph/src/discover.rs` :
 
 ```rust
 #[cfg(test)]
@@ -1021,14 +1025,14 @@ mod tests {
 - [ ] **Étape 2 : lancer le test et vérifier qu'il échoue**
 
 ```bash
-cargo test -p mycelium-graph discover 2>&1 | tail -12
+cargo test -p kog-graph discover 2>&1 | tail -12
 ```
 
 Attendu : `cannot find function discover`.
 
 - [ ] **Étape 3 : écrire l'implémentation minimale**
 
-En tête de `crates/mycelium-graph/src/discover.rs` :
+En tête de `crates/kog-graph/src/discover.rs` :
 
 ```rust
 use std::path::{Path, PathBuf};
@@ -1087,7 +1091,7 @@ pub use discover::discover;
 - [ ] **Étape 4 : lancer les tests et vérifier qu'ils passent**
 
 ```bash
-cargo test -p mycelium-graph 2>&1 | tail -8
+cargo test -p kog-graph 2>&1 | tail -8
 ```
 
 Attendu : `test result: ok. 20 passed`.
@@ -1104,9 +1108,9 @@ git add -A && git commit -m "feat(discover): walk a project for source files"
 ## Task 6 — l'extracteur TypeScript
 
 **Fichiers :**
-- Créer : `crates/mycelium-graph/src/extractors/mod.rs`,
-  `crates/mycelium-graph/src/extractors/typescript.rs`
-- Modifier : `crates/mycelium-graph/src/lib.rs`
+- Créer : `crates/kog-graph/src/extractors/mod.rs`,
+  `crates/kog-graph/src/extractors/typescript.rs`
+- Modifier : `crates/kog-graph/src/lib.rs`
 
 **Interfaces :**
 - Consomme : `Extractor`, `Specifier`, `Resolution`, `ExtractError` (tâche 3) ;
@@ -1121,7 +1125,7 @@ renvoie un `StreamingIterator`, donc `while let Some(m) = matches.next()` avec
 
 - [ ] **Étape 1 : écrire le test qui échoue**
 
-`crates/mycelium-graph/src/extractors/mod.rs` :
+`crates/kog-graph/src/extractors/mod.rs` :
 
 ```rust
 pub mod typescript;
@@ -1129,7 +1133,7 @@ pub mod typescript;
 pub use typescript::TypeScriptExtractor;
 ```
 
-En fin de `crates/mycelium-graph/src/extractors/typescript.rs` :
+En fin de `crates/kog-graph/src/extractors/typescript.rs` :
 
 ```rust
 #[cfg(test)]
@@ -1345,14 +1349,14 @@ export * from "./barrel";"#);
 - [ ] **Étape 2 : lancer le test et vérifier qu'il échoue**
 
 ```bash
-cargo test -p mycelium-graph typescript 2>&1 | tail -12
+cargo test -p kog-graph typescript 2>&1 | tail -12
 ```
 
 Attendu : `cannot find type TypeScriptExtractor`.
 
 - [ ] **Étape 3 : écrire l'implémentation minimale**
 
-En tête de `crates/mycelium-graph/src/extractors/typescript.rs` :
+En tête de `crates/kog-graph/src/extractors/typescript.rs` :
 
 ```rust
 use crate::extractor::{ExtractError, Extractor, Resolution, Specifier};
@@ -1544,7 +1548,7 @@ pub use extractors::TypeScriptExtractor;
 - [ ] **Étape 4 : lancer les tests et vérifier qu'ils passent**
 
 ```bash
-cargo test -p mycelium-graph 2>&1 | tail -8
+cargo test -p kog-graph 2>&1 | tail -8
 ```
 
 Attendu : `test result: ok. 38 passed`.
@@ -1561,8 +1565,8 @@ git add -A && git commit -m "feat(typescript): extract and resolve import specif
 ## Task 7 — assemblage du graphe
 
 **Fichiers :**
-- Créer : `crates/mycelium-graph/src/graph.rs`
-- Modifier : `crates/mycelium-graph/src/lib.rs`
+- Créer : `crates/kog-graph/src/graph.rs`
+- Modifier : `crates/kog-graph/src/lib.rs`
 
 **Interfaces :**
 - Consomme : `discover` (tâche 5), `Extractor` (tâche 3), `model` (tâche 2).
@@ -1571,7 +1575,7 @@ git add -A && git commit -m "feat(typescript): extract and resolve import specif
 
 - [ ] **Étape 1 : écrire le test qui échoue**
 
-En fin de `crates/mycelium-graph/src/graph.rs` :
+En fin de `crates/kog-graph/src/graph.rs` :
 
 ```rust
 #[cfg(test)]
@@ -1685,14 +1689,14 @@ import ghost from "./ghost";"#,
 - [ ] **Étape 2 : lancer le test et vérifier qu'il échoue**
 
 ```bash
-cargo test -p mycelium-graph graph 2>&1 | tail -12
+cargo test -p kog-graph graph 2>&1 | tail -12
 ```
 
 Attendu : `cannot find function build_graph`.
 
 - [ ] **Étape 3 : écrire l'implémentation minimale**
 
-En tête de `crates/mycelium-graph/src/graph.rs` :
+En tête de `crates/kog-graph/src/graph.rs` :
 
 ```rust
 use crate::discover::discover;
@@ -1828,7 +1832,7 @@ pub use graph::build_graph;
 - [ ] **Étape 4 : lancer les tests et vérifier qu'ils passent**
 
 ```bash
-cargo test -p mycelium-graph 2>&1 | tail -8
+cargo test -p kog-graph 2>&1 | tail -8
 ```
 
 Attendu : `test result: ok. 46 passed`.
@@ -1845,24 +1849,24 @@ git add -A && git commit -m "feat(graph): assemble nodes, edges and resolution s
 ## Task 8 — le CLI
 
 **Fichiers :**
-- Modifier : `crates/mycelium-cli/src/main.rs`
+- Modifier : `crates/kog-cli/src/main.rs`
 
 **Interfaces :**
 - Consomme : `build_graph`, `TypeScriptExtractor`, `Graph` (tâches 2, 6, 7).
-- Produit : le binaire `mycelium` avec la sous-commande `scan`.
+- Produit : le binaire `kog` avec la sous-commande `scan`.
 
 - [ ] **Étape 1 : écrire l'implémentation**
 
-`crates/mycelium-cli/src/main.rs` :
+`crates/kog-cli/src/main.rs` :
 
 ```rust
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
-use mycelium_graph::{build_graph, TypeScriptExtractor};
+use kog_graph::{build_graph, TypeScriptExtractor};
 use std::path::PathBuf;
 
 #[derive(Parser)]
-#[command(name = "mycelium", version, about = "Map a codebase into a graph")]
+#[command(name = "kog", version, about = "Map a codebase into a graph")]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -1947,7 +1951,7 @@ fn scan(root: PathBuf, output: PathBuf, stats_only: bool) -> Result<()> {
 
 ```bash
 export PATH="$HOME/.cargo/bin:$PATH"
-cargo run -q -p mycelium-cli -- scan ~/apps/lueur --stats-only
+cargo run -q -p kog-cli -- scan ~/apps/lueur --stats-only
 ```
 
 Attendu : `files discovered` proche de 93, `resolution rate` affiché, aucun panic.
@@ -1955,7 +1959,7 @@ Attendu : `files discovered` proche de 93, `resolution rate` affiché, aucun pan
 - [ ] **Étape 3 : vérifier que la racine absente échoue fort**
 
 ```bash
-cargo run -q -p mycelium-cli -- scan /definitely/not/real --stats-only; echo "exit=$?"
+cargo run -q -p kog-cli -- scan /definitely/not/real --stats-only; echo "exit=$?"
 ```
 
 Attendu : message d'erreur explicite et `exit=1`.
@@ -1999,7 +2003,7 @@ import Graph from "graphology";
 import forceAtlas2 from "graphology-layout-forceatlas2";
 import Sigma from "sigma";
 
-type MyceliumNode = {
+type KogNode = {
   id: string;
   path: string;
   lang: string;
@@ -2007,11 +2011,11 @@ type MyceliumNode = {
   external_deps: string[];
 };
 
-type MyceliumEdge = { source: string; target: string; kind: string };
+type KogEdge = { source: string; target: string; kind: string };
 
-type MyceliumGraph = {
-  nodes: MyceliumNode[];
-  edges: MyceliumEdge[];
+type KogGraph = {
+  nodes: KogNode[];
+  edges: KogEdge[];
   stats: { resolution_rate: number; files_discovered: number };
 };
 
@@ -2031,7 +2035,7 @@ async function main(): Promise<void> {
 
   const response = await fetch("/graph.json");
   if (!response.ok) throw new Error(`graph.json: ${response.status}`);
-  const data: MyceliumGraph = await response.json();
+  const data: KogGraph = await response.json();
 
   const graph = new Graph();
   for (const node of data.nodes) {
@@ -2096,7 +2100,7 @@ Supprimer `app/src/App.tsx`, `app/src/App.css`, `app/src/index.css` et
 cd ~/apps/mycelium
 export PATH="$HOME/.cargo/bin:$PATH"
 mkdir -p app/public
-cargo run -q -p mycelium-cli -- scan ~/apps/lueur -o app/public/graph.json
+cargo run -q -p kog-cli -- scan ~/apps/lueur -o app/public/graph.json
 cd app && bun run dev
 ```
 
@@ -2127,7 +2131,7 @@ git add -A && git commit -m "feat(app): render the graph with sigma"
 cd ~/apps/mycelium
 export PATH="$HOME/.cargo/bin:$PATH"
 cargo build --release -q
-time ./target/release/mycelium scan ~/Mastore/mastore-saas -o /tmp/saas-graph.json
+time ./target/release/kog scan ~/Mastore/mastore-saas -o /tmp/saas-graph.json
 ```
 
 Relever : `files discovered`, `resolution rate`, `nodes`, `edges`, durée.
@@ -2144,7 +2148,7 @@ jq -e '.stats.resolution_rate >= 0.95' /tmp/saas-graph.json >/dev/null \
 catégoriser avant toute correction :
 
 ```bash
-./target/release/mycelium scan ~/Mastore/mastore-saas --stats-only 2>&1 | tail -20
+./target/release/kog scan ~/Mastore/mastore-saas --stats-only 2>&1 | tail -20
 ```
 
 Les causes attendues, par ordre de probabilité : un alias non pris dans la chaîne

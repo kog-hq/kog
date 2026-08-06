@@ -1,6 +1,6 @@
-# mycelium — graph viewer
+# KOG — graph viewer
 
-This is the rendering half of mycelium: a Vite + TypeScript page that loads
+This is the rendering half of KOG: a Vite + TypeScript page that loads
 `/graph.json` and draws it with [sigma.js](https://www.sigma.js.org/) —
 nodes are source files, edges are static imports, laid out with ForceAtlas2
 and coloured by top-level directory. See `docs/design/v0-design.md` at the
@@ -9,11 +9,11 @@ repository root for the full design.
 `app/src/main.tsx` is plain DOM/TypeScript; there is no framework in this
 page (no React, despite the Vite template this was scaffolded from).
 
-**This page ships embedded in the `mycelium` binary.** `bun run dev` below
+**This page ships embedded in the `kog` binary.** `bun run dev` below
 is the *contributor* workflow for iterating on the page itself — it is not
-how anyone using `mycelium` sees a graph. The end-user path is `mycelium`
-(equivalently `mycelium view <dir>`): `app/dist` is embedded into the CLI at
-compile time via `rust-embed` (`crates/mycelium-cli/build.rs` and
+how anyone using `kog` sees a graph. The end-user path is `kog`
+(equivalently `kog view <dir>`): `app/dist` is embedded into the CLI at
+compile time via `rust-embed` (`crates/kog-cli/build.rs` and
 `src/server.rs`), and at runtime the CLI scans the requested project and
 serves that page over an in-memory `tiny_http` server — no Vite, no `bun`,
 and no `public/graph.json` involved. The live scan always wins over
@@ -34,7 +34,7 @@ browser console. Generate one first, from the repository root:
 ```bash
 export PATH="$HOME/.cargo/bin:$PATH"   # if ~/.cargo/bin isn't already on PATH
 cargo build --release
-./target/release/mycelium scan <path-to-a-typescript-project> -o app/public/graph.json
+./target/release/kog scan <path-to-a-typescript-project> -o app/public/graph.json
 ```
 
 Then, from this directory:
@@ -47,7 +47,7 @@ bun run dev
 Before committing a change to this page, run `bun run build` (or
 `just build` from the repository root) and rebuild the CLI so `app/dist`
 gets re-embedded — a stale `dist` silently serves the old page even after
-`app/src` changes. `crates/mycelium-cli/build.rs` fails loudly if
+`app/src` changes. `crates/kog-cli/build.rs` fails loudly if
 `app/dist` doesn't exist at all, but it can't tell a stale build from a
 fresh one; only a rebuild does that.
 
@@ -55,7 +55,7 @@ fresh one; only a rebuild does that.
 
 - `bun run dev` — start the Vite dev server.
 - `bun run build` — type-check (`tsc -b`) and produce a production build in
-  `dist/`, which `cargo build` then embeds into the `mycelium` binary
+  `dist/`, which `cargo build` then embeds into the `kog` binary
   wholesale, including whatever `public/graph*.json` happens to exist at
   build time (see above).
 - `bun run preview` — serve the `dist/` build locally.

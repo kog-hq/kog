@@ -1,19 +1,19 @@
 [package]
-name = "mycelium-cli"
-description = "Command line interface for mycelium"
+name = "kog-cli"
+description = "Command line interface for kog"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
 [[bin]]
-name = "mycelium"
+name = "kog"
 path = "src/main.rs"
 
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
-mycelium-graph = { path = "../mycelium-graph" }
+kog-graph = { path = "../kog-graph" }
 open.workspace = true
 rust-embed.workspace = true
 serde_json.workspace = true

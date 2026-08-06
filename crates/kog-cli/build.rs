@@ -9,7 +9,7 @@ use std::path::PathBuf;
 fn main() {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")
         .expect("CARGO_MANIFEST_DIR is always set by cargo when running a build script");
-    // crates/mycelium-cli -> repo root -> app/dist
+    // crates/kog-cli -> repo root -> app/dist
     let dist_dir = PathBuf::from(&manifest_dir).join("../../app/dist");
     let index_html = dist_dir.join("index.html");
 
@@ -22,7 +22,7 @@ fn main() {
         eprintln!();
         eprintln!("error: app/dist/index.html not found");
         eprintln!();
-        eprintln!("mycelium-cli embeds the web UI (app/dist) into the binary at compile");
+        eprintln!("kog-cli embeds the web UI (app/dist) into the binary at compile");
         eprintln!("time via rust-embed, so the page must be built before `cargo build`.");
         eprintln!();
         eprintln!("Fix:");

@@ -1,13 +1,13 @@
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
-use mycelium_graph::{build_graph, Graph, TypeScriptExtractor};
+use kog_graph::{build_graph, Graph, TypeScriptExtractor};
 use std::path::PathBuf;
 
 mod server;
 
 #[derive(Parser)]
 #[command(
-    name = "mycelium",
+    name = "kog",
     version,
     about = "Map a codebase into a graph, and view it"
 )]
@@ -31,7 +31,7 @@ enum Command {
     },
     /// Scan a project and serve the graph in a browser.
     ///
-    /// This is what bare `mycelium` runs. Never writes a file: the graph is
+    /// This is what bare `kog` runs. Never writes a file: the graph is
     /// held in memory and served from the binary's embedded page.
     View {
         /// Project root to view. Defaults to the current directory.
@@ -42,7 +42,7 @@ enum Command {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    // Bare `mycelium` (no subcommand at all) is explicitly `view .` — typing
+    // Bare `kog` (no subcommand at all) is explicitly `view .` — typing
     // a path is optional everywhere, and typing a subcommand is optional
     // too. This is a deliberate default, not clap falling through to one.
     let command = cli.command.unwrap_or(Command::View {
@@ -102,7 +102,7 @@ fn scan(root: PathBuf, output: Option<PathBuf>) -> Result<()> {
     }
 
     // `unresolved` and `excluded` are the exact totals; `diagnostics` is
-    // capped (see `mycelium_graph::MAX_DIAGNOSTICS`), so the two can
+    // capped (see `kog_graph::MAX_DIAGNOSTICS`), so the two can
     // diverge on a badly broken repo. Report both rather than let the
     // printed count silently understate the real one.
     let non_resolved_total = stats.unresolved + stats.excluded;
@@ -258,14 +258,14 @@ mod tests {
     ///
     /// This is a *genuine* failure reachable through the public API, not a
     /// simulated one: `std::fs::read_to_string` (used internally by
-    /// `mycelium_graph::build_graph`) errors with `InvalidData` on a file
+    /// `kog_graph::build_graph`) errors with `InvalidData` on a file
     /// that is not valid UTF-8, which a `.ts` file full of raw non-UTF-8
     /// bytes reliably triggers. A genuine tree-sitter *parse* failure could
     /// not be constructed this way from outside the crate — tree-sitter is
     /// fault-tolerant and recovers from any malformed source a test could
     /// plausibly hand it (see
-    /// `mycelium_graph::extractors::typescript::tests::a_syntactically_broken_file_still_yields_what_it_can`
-    /// and `mycelium_graph::graph::tests::an_import_into_a_file_that_fails_to_parse_produces_no_dangling_edge`,
+    /// `kog_graph::extractors::typescript::tests::a_syntactically_broken_file_still_yields_what_it_can`
+    /// and `kog_graph::graph::tests::an_import_into_a_file_that_fails_to_parse_produces_no_dangling_edge`,
     /// which resorts to a test-only `Extractor` wrapper for that reason).
     #[test]
     fn a_file_that_cannot_be_read_does_not_make_the_scan_fatal() {
@@ -314,7 +314,7 @@ mod tests {
     /// the test process's actual working directory.
     #[test]
     fn scan_root_defaults_to_the_current_directory() {
-        let cli = Cli::try_parse_from(["mycelium", "scan"]).unwrap();
+        let cli = Cli::try_parse_from(["kog", "scan"]).unwrap();
         assert_eq!(
             cli.command,
             Some(Command::Scan {
@@ -327,7 +327,7 @@ mod tests {
     /// `ROOT` on `view` defaults to the current directory too.
     #[test]
     fn view_root_defaults_to_the_current_directory() {
-        let cli = Cli::try_parse_from(["mycelium", "view"]).unwrap();
+        let cli = Cli::try_parse_from(["kog", "view"]).unwrap();
         assert_eq!(
             cli.command,
             Some(Command::View {
@@ -336,19 +336,19 @@ mod tests {
         );
     }
 
-    /// Bare `mycelium`, with no subcommand at all, must resolve to `view .`
+    /// Bare `kog`, with no subcommand at all, must resolve to `view .`
     /// — this is the whole feature. Parsing alone leaves `command: None`;
     /// `main` is what applies the default, so this test exercises the
     /// clap-level half of that contract.
     #[test]
     fn bare_invocation_parses_with_no_subcommand() {
-        let cli = Cli::try_parse_from(["mycelium"]).unwrap();
+        let cli = Cli::try_parse_from(["kog"]).unwrap();
         assert_eq!(cli.command, None);
     }
 
     #[test]
     fn scan_with_output_short_flag_parses() {
-        let cli = Cli::try_parse_from(["mycelium", "scan", "some/dir", "-o", "g.json"]).unwrap();
+        let cli = Cli::try_parse_from(["kog", "scan", "some/dir", "-o", "g.json"]).unwrap();
         assert_eq!(
             cli.command,
             Some(Command::Scan {

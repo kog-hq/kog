@@ -227,7 +227,7 @@ intervention.
     "failures": [],
     "diagnostics": [
       {
-        "path": "apps/backend/prisma/seed-travaux.ts",
+        "path": "apps/backend/prisma/seed.ts",
         "line": 2,
         "specifier": "../src/generated/prisma/client",
         "kind": "excluded"
@@ -237,8 +237,10 @@ intervention.
 }
 ```
 
-Figures as measured on the acceptance target, see
-`docs/measurements/2026-08-06-v0-gate.md`.
+Figures as measured on the private reference monorepo described in §3.4. That
+measurement is not independently reproducible — the project it was measured against
+is private. `docs/measurements/2026-08-06-public-repos-gate.md` reruns the same
+measurement on two public repositories a reader can clone and check by hand.
 
 `resolution_rate` = `resolved / (specifiers_internal - excluded)`. Externals are
 outside the calculation: an `import react` doesn't have to point to a file. `excluded`

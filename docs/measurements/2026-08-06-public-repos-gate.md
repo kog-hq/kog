@@ -322,8 +322,8 @@ pnpm --filter @documenso/remix run build       # emits build/server/{index,hono/
 # failures (§6.3, §6.5) resolve
 cd bench/query
 pnpm install
-pnpm --filter query-example-svelte-basic run build
-pnpm --filter query-example-svelte-ssr run build
+pnpm --filter @tanstack/query-example-svelte-basic run build
+pnpm --filter @tanstack/query-example-svelte-ssr run build
 ```
 
 The remaining specifiers in §6.1–§6.4 (the fumadocs virtual module, the codemod

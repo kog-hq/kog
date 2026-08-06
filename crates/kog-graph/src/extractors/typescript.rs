@@ -100,16 +100,26 @@ impl TypeScriptExtractor {
         }
 
         // `./b.js` is written by ESM/NodeNext style but `./b.ts` is on disk.
-        if let Some(stem) = candidate
-            .extension()
-            .and_then(|e| e.to_str())
-            .filter(|e| matches!(*e, "js" | "jsx" | "mjs" | "cjs"))
-            .map(|_| candidate.with_extension(""))
-        {
-            for ext in EXTENSION_ORDER {
-                let probed = stem.with_extension(ext);
-                if probed.is_file() {
-                    return Some(probed);
+        // The matched suffix (`.js`/`.jsx`/`.mjs`/`.cjs`) must be trimmed by
+        // its exact byte length, not via a second `Path::with_extension`
+        // call: for a double extension like `containers.svelte.js` (the
+        // Svelte 5 runes-file convention — found on TanStack Query's
+        // `packages/svelte-query`, e.g. `createBaseQuery.svelte.ts`
+        // importing `./containers.svelte.js`, on disk as
+        // `containers.svelte.ts`), stripping `.js` leaves `containers.svelte`,
+        // whose own `.extension()` is `svelte` — a second `with_extension`
+        // would then replace `.svelte` too, landing on `containers.ts`
+        // instead of `containers.svelte.ts`.
+        if let Some(orig_ext) = candidate.extension().and_then(|e| e.to_str()) {
+            if matches!(orig_ext, "js" | "jsx" | "mjs" | "cjs") {
+                if let Some(full) = candidate.to_str() {
+                    let base = &full[..full.len() - orig_ext.len() - 1];
+                    for ext in EXTENSION_ORDER {
+                        let probed = PathBuf::from(format!("{base}.{ext}"));
+                        if probed.is_file() {
+                            return Some(probed);
+                        }
+                    }
                 }
             }
         }
@@ -653,6 +663,26 @@ export * from "./barrel";"#,
         let e = TypeScriptExtractor::new(dir.path());
         let got = e.resolve("./b.js", &dir.path().join("src/a.ts"));
         assert_eq!(got, Resolution::Internal(dir.path().join("src/b.ts")));
+    }
+
+    #[test]
+    fn a_double_extension_js_specifier_falls_back_to_its_ts_sibling() {
+        // Svelte 5 runes files are named `foo.svelte.ts` and imported with
+        // an explicit `.svelte.js` specifier — found on TanStack Query's
+        // `packages/svelte-query` (`createBaseQuery.svelte.ts` imports
+        // `./containers.svelte.js`, and the file on disk is
+        // `containers.svelte.ts`). `Path::with_extension` treats `.svelte`
+        // as the stripped candidate's own extension and replaces it,
+        // landing on `containers.ts` instead of `containers.svelte.ts`.
+        let dir = TempDir::new().unwrap();
+        write(&dir, "src/a.ts", "");
+        write(&dir, "src/containers.svelte.ts", "");
+        let e = TypeScriptExtractor::new(dir.path());
+        let got = e.resolve("./containers.svelte.js", &dir.path().join("src/a.ts"));
+        assert_eq!(
+            got,
+            Resolution::Internal(dir.path().join("src/containers.svelte.ts"))
+        );
     }
 
     // --- Vite-style query/fragment suffix (public-repo finding: documenso) ---

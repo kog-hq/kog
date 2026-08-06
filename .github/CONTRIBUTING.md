@@ -8,10 +8,6 @@ as code — the shape of v0.1 and beyond is open.
 
 Read [`docs/design/v0-design.md`](../docs/design/v0-design.md) and push back.
 
-The design doc is written in French, as a working document. Section titles and
-all identifiers, schemas and product strings are in English. If that's a barrier
-for you, open an issue and say so — we'll translate it.
-
 ## Code contributions
 
 - `cargo fmt --all` and `cargo clippy --all-targets -- -D warnings` must pass.

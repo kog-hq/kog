@@ -61,9 +61,7 @@ This project is pre-release; see
 [`.github/CONTRIBUTING.md`](.github/CONTRIBUTING.md) for the current state
 and how to contribute. The design rationale — what's in v0, what's
 deliberately out, and the measurements behind each call — lives in
-[`docs/design/v0-design.md`](docs/design/v0-design.md) (written in French,
-as a working document; identifiers, schemas and product strings are in
-English throughout the codebase).
+[`docs/design/v0-design.md`](docs/design/v0-design.md).
 
 ```
 just build    # build the page, then the release binary

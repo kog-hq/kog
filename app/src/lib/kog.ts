@@ -7,6 +7,8 @@
  * traversal of 2,800 nodes.
  */
 
+import { FOLDER_SLOTS, folderKey } from "@/lib/palette";
+
 export type NodeKind = "source" | "unread_source" | "asset";
 
 export type KogNode = {
@@ -120,6 +122,9 @@ export type LanguageRow = {
   unread: boolean;
 };
 
+/** A folder that carries a colour slot, with what it holds. */
+export type FolderRow = { key: string; count: number; slot: number | null };
+
 export type ProjectIndex = {
   byId: Map<string, KogNode>;
   /** Files this file imports. */
@@ -133,6 +138,9 @@ export type ProjectIndex = {
   diagnosticsByFile: Map<string, KogDiagnostic[]>;
   languages: LanguageRow[];
   kinds: { kind: NodeKind; count: number }[];
+  /** Biggest folders first; only the first few carry a colour. */
+  folders: FolderRow[];
+  folderSlot: Map<string, number>;
 };
 
 function parentOf(id: string): string {
@@ -249,6 +257,26 @@ export function indexProject(project: KogProject): ProjectIndex {
     .filter((kind) => kindCounts.has(kind))
     .map((kind) => ({ kind, count: kindCounts.get(kind) ?? 0 }));
 
+  // Folders get colour slots by size, in a fixed order, and only as many as
+  // the palette can actually keep distinguishable. The rest are neutral —
+  // generating a hue for the ninth folder is how a palette stops meaning
+  // anything (see `lib/palette.ts`).
+  const folderCounts = new Map<string, number>();
+  for (const node of nodes) {
+    const key = folderKey(node.id);
+    folderCounts.set(key, (folderCounts.get(key) ?? 0) + 1);
+  }
+  const folders: FolderRow[] = [...folderCounts.entries()]
+    .map(([key, count]) => ({ key, count, slot: null as number | null }))
+    .sort((a, b) => b.count - a.count || a.key.localeCompare(b.key));
+  const folderSlot = new Map<string, number>();
+  folders.forEach((folder, position) => {
+    if (position < FOLDER_SLOTS.length) {
+      folder.slot = position;
+      folderSlot.set(folder.key, position);
+    }
+  });
+
   return {
     byId,
     dependencies,
@@ -258,6 +286,8 @@ export function indexProject(project: KogProject): ProjectIndex {
     diagnosticsByFile,
     languages,
     kinds,
+    folders,
+    folderSlot,
   };
 }
 

@@ -3,7 +3,17 @@ import { EdgeArrowProgram } from "sigma/rendering";
 import type { Settings } from "sigma/settings";
 import type { NodeDisplayData, PartialButFor } from "sigma/types";
 import { useEffect, useMemo, useRef } from "react";
-import { buildGraph, readCanvasTheme, recolour, type CanvasTheme } from "./build";
+import { CursorField } from "./cursor_field";
+import {
+  buildGraph,
+  readCanvasTheme,
+  recolour,
+  ringOf,
+  type CanvasTheme,
+  type ColourBy,
+  type Theme,
+} from "./build";
+import type { NodeState } from "@/lib/palette";
 import type { KogProject, ProjectIndex } from "@/lib/kog";
 
 export type LabelMode = "none" | "hubs" | "more" | "all";
@@ -29,6 +39,9 @@ export function defaultLabelMode(nodeCount: number): LabelMode {
 /** How long the graph takes to arrive, in milliseconds. */
 const REVEAL_MS = 620;
 
+/** The cursor's reach, in screen pixels, converted to graph units per frame. */
+const FIELD_RADIUS_PX = 120;
+
 function prefersReducedMotion(): boolean {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
@@ -41,8 +54,8 @@ export type CanvasState = {
   hovered: string | null;
   labelMode: LabelMode;
   groupByFolder: boolean;
-  /** Repaint trigger for a theme change. */
-  theme: string;
+  colourBy: ColourBy;
+  theme: Theme;
 };
 
 type Props = CanvasState & {
@@ -83,8 +96,7 @@ function labelDrawer(theme: CanvasTheme, bold = false) {
 }
 
 /**
- * The hovered node gets a breathing ring, drawn on sigma's hover layer above
- * everything else.
+ * The hovered node gets a breathing ring on sigma's hover layer.
  *
  * A node that grows on hover would be ambiguous: size already means degree
  * here, so growing it says something false. A ring adds emphasis without
@@ -119,6 +131,7 @@ export function GraphCanvas(props: Props) {
     hovered,
     labelMode,
     groupByFolder,
+    colourBy,
     theme,
     onSelect,
     onHover,
@@ -126,17 +139,19 @@ export function GraphCanvas(props: Props) {
 
   const container = useRef<HTMLDivElement>(null);
   const sigma = useRef<Sigma | null>(null);
+  const field = useRef<CursorField | null>(null);
 
   // Animation state lives in refs: a frame loop must not re-render React 60
   // times a second to move a highlight by two pixels.
   const reveal = useRef(1);
   const breath = useRef(0);
+  const rings = useRef(new Map<string, string>());
 
   // The layout is the expensive part, so it is tied to what actually changes
   // its shape: the project and whether folders are collapsed. Filters,
-  // selection and hover never reach here.
+  // selection, colour mode and hover never reach here.
   const graph = useMemo(
-    () => buildGraph(project, index, readCanvasTheme(), { groupByFolder }),
+    () => buildGraph(project, index, { groupByFolder }),
     [project, index, groupByFolder],
   );
 
@@ -156,7 +171,7 @@ export function GraphCanvas(props: Props) {
 
   useEffect(() => {
     if (!container.current) return;
-    const canvasTheme = readCanvasTheme();
+    const canvasTheme = readCanvasTheme(theme);
     const renderer = new Sigma(graph, container.current, {
       renderEdgeLabels: false,
       defaultEdgeColor: canvasTheme.edge,
@@ -173,6 +188,7 @@ export function GraphCanvas(props: Props) {
       zIndex: true,
     });
     sigma.current = renderer;
+    field.current = new CursorField(graph);
 
     renderer.on("clickNode", ({ node }) => onSelect(node));
     renderer.on("clickStage", () => onSelect(null));
@@ -182,12 +198,75 @@ export function GraphCanvas(props: Props) {
     return () => {
       renderer.kill();
       sigma.current = null;
+      field.current = null;
     };
-  }, [graph, onSelect, onHover]);
+  }, [graph, theme, onSelect, onHover]);
 
-  // The graph arrives rather than appearing: nodes scale up from nothing over
-  // half a second. It costs one number in a reducer, and it turns a hard cut
-  // into a moment where the eye can follow the shape forming.
+  /**
+   * The graph parts under the pointer, and closes behind it.
+   *
+   * The loop only runs while something is actually moving: a cursor over the
+   * canvas, or nodes still springing back. It stops on its own the moment the
+   * graph is at rest, so an idle window costs nothing.
+   */
+  useEffect(() => {
+    const renderer = sigma.current;
+    if (!renderer || prefersReducedMotion()) return;
+
+    let cursor: { x: number; y: number } | null = null;
+    let raf = 0;
+    let running = false;
+
+    const tick = () => {
+      const active = field.current?.step(cursor, {
+        // Both are read from the camera, so the effect is the same size on
+        // screen whatever the zoom.
+        radius: FIELD_RADIUS_PX * renderer.getCamera().ratio * scale(),
+        strength: 2.2 * renderer.getCamera().ratio * scale(),
+      });
+      renderer.refresh({ skipIndexation: true });
+      if (cursor || active) raf = requestAnimationFrame(tick);
+      else running = false;
+    };
+
+    // One graph unit in screen pixels, so the field can be specified in
+    // pixels and behave identically at every zoom level.
+    const scale = () => {
+      const a = renderer.viewportToGraph({ x: 0, y: 0 });
+      const b = renderer.viewportToGraph({ x: 1, y: 0 });
+      return Math.abs(b.x - a.x) / Math.max(renderer.getCamera().ratio, 1e-6);
+    };
+
+    const start = () => {
+      if (running) return;
+      running = true;
+      raf = requestAnimationFrame(tick);
+    };
+
+    const mouse = renderer.getMouseCaptor();
+    const onMove = (event: { x: number; y: number }) => {
+      cursor = renderer.viewportToGraph(event);
+      start();
+    };
+    const onLeave = () => {
+      cursor = null;
+      start();
+    };
+
+    mouse.on("mousemovebody", onMove);
+    mouse.on("mouseleave", onLeave);
+
+    return () => {
+      mouse.off("mousemovebody", onMove);
+      mouse.off("mouseleave", onLeave);
+      cancelAnimationFrame(raf);
+      field.current?.reset();
+    };
+  }, [graph]);
+
+  // The graph arrives rather than appearing: nodes scale up over half a
+  // second, which turns a hard cut into a moment where the eye can follow the
+  // shape forming.
   useEffect(() => {
     if (prefersReducedMotion()) {
       reveal.current = 1;
@@ -198,7 +277,6 @@ export function GraphCanvas(props: Props) {
     let raf = 0;
     const step = () => {
       const elapsed = performance.now() - started;
-      // Expo-out: quickly to nearly-there, then settle.
       reveal.current = Math.min(1, 1 - Math.pow(2, (-10 * elapsed) / REVEAL_MS));
       sigma.current?.refresh({ skipIndexation: true });
       if (elapsed < REVEAL_MS) raf = requestAnimationFrame(step);
@@ -227,13 +305,22 @@ export function GraphCanvas(props: Props) {
     return () => cancelAnimationFrame(raf);
   }, [focus]);
 
-  // Filtering, selection and hover are all one repaint: sigma asks these
-  // reducers what each node and edge looks like right now.
+  // Filtering, selection, hover and colour mode are all one repaint: sigma
+  // asks these reducers what each node and edge looks like right now.
   useEffect(() => {
     const renderer = sigma.current;
     if (!renderer) return;
-    const canvasTheme = readCanvasTheme();
-    recolour(graph, canvasTheme);
+    const canvasTheme = readCanvasTheme(theme);
+    recolour(graph, index, colourBy, theme);
+
+    // The ring is the second channel that keeps "not read" and "has a gap"
+    // legible without relying on hue — including for a reader who cannot
+    // separate magenta from teal.
+    rings.current = new Map();
+    graph.forEachNode((node, attributes) => {
+      const ring = ringOf(attributes.state as NodeState, canvasTheme);
+      if (ring) rings.current.set(node, ring);
+    });
 
     renderer.setSetting("nodeReducer", (node, data) => {
       if (visible && !visible.has(node)) return { ...data, hidden: true };
@@ -299,7 +386,7 @@ export function GraphCanvas(props: Props) {
     renderer.setSetting("defaultDrawNodeHover", hoverDrawer(canvasTheme, () => breath.current));
     renderer.setSetting("defaultEdgeColor", canvasTheme.edge);
     renderer.refresh();
-  }, [graph, visible, selected, focus, theme]);
+  }, [graph, index, visible, selected, focus, colourBy, theme]);
 
   useEffect(() => {
     const renderer = sigma.current;

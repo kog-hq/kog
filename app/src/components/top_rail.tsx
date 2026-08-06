@@ -1,8 +1,9 @@
 import { Moon, Search, Sun } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { CoverageMeter } from "@/components/Meter";
-import type { LabelMode } from "@/graph/GraphCanvas";
+import { CoverageMeter } from "@/components/meter";
+import type { LabelMode } from "@/graph/graph_canvas";
+import type { ColourBy } from "@/graph/build";
 import type { KogProject, KogWorkspace } from "@/lib/kog";
 import { formatCount, formatRate, sourceCoverage } from "@/lib/kog";
 
@@ -31,6 +32,11 @@ function Mark({ className }: { className?: string }) {
 
 const LABEL_MODES: LabelMode[] = ["none", "hubs", "more", "all"];
 
+const COLOUR_MODES: { value: ColourBy; label: string }[] = [
+  { value: "state", label: "colour: state" },
+  { value: "folder", label: "colour: folder" },
+];
+
 export function TopRail({
   workspace,
   project,
@@ -38,6 +44,8 @@ export function TopRail({
   onSearch,
   labelMode,
   onLabelMode,
+  colourBy,
+  onColourBy,
   theme,
   onTheme,
 }: {
@@ -47,6 +55,8 @@ export function TopRail({
   onSearch: () => void;
   labelMode: LabelMode;
   onLabelMode: (mode: LabelMode) => void;
+  colourBy: ColourBy;
+  onColourBy: (mode: ColourBy) => void;
   theme: "light" | "dark";
   onTheme: () => void;
 }) {
@@ -107,6 +117,21 @@ export function TopRail({
           </span>
         </div>
       </div>
+
+      <label className="flex shrink-0 items-center gap-1.5">
+        <span className="sr-only">What colour means</span>
+        <select
+          value={colourBy}
+          onChange={(event) => onColourBy(event.target.value as ColourBy)}
+          className="h-7 cursor-pointer rounded-md border border-border bg-background px-2 text-[12px] outline-none hover:bg-accent"
+        >
+          {COLOUR_MODES.map((mode) => (
+            <option key={mode.value} value={mode.value}>
+              {mode.label}
+            </option>
+          ))}
+        </select>
+      </label>
 
       <label className="flex shrink-0 items-center gap-1.5">
         <span className="sr-only">Labels</span>

@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { GraphCanvas, defaultLabelMode, type LabelMode } from "@/graph/GraphCanvas";
-import { FindFile } from "@/components/FindFile";
-import { Inspector } from "@/components/Inspector";
-import { Sidebar, type Filters } from "@/components/Sidebar";
-import { TopRail } from "@/components/TopRail";
+import { GraphCanvas, defaultLabelMode, type LabelMode } from "@/graph/graph_canvas";
+import type { ColourBy } from "@/graph/build";
+import { FindFile } from "@/components/find_file";
+import { Inspector } from "@/components/inspector";
+import { Sidebar, type Filters } from "@/components/sidebar";
+import { TopRail } from "@/components/top_rail";
 import {
   indexProject,
   formatCount,
@@ -31,6 +32,7 @@ export function App({ workspace }: { workspace: KogWorkspace }) {
   const [hovered, setHovered] = useState<string | null>(null);
   const [searching, setSearching] = useState(false);
   const [groupByFolder, setGroupByFolder] = useState(false);
+  const [colourBy, setColourBy] = useState<ColourBy>("state");
   const [filters, setFilters] = useState<Filters>({
     languages: null,
     kinds: new Set(ALL_KINDS),
@@ -116,6 +118,8 @@ export function App({ workspace }: { workspace: KogWorkspace }) {
         onSearch={() => setSearching(true)}
         labelMode={labelMode}
         onLabelMode={setLabelMode}
+        colourBy={colourBy}
+        onColourBy={setColourBy}
         theme={theme}
         onTheme={() => setTheme(theme === "dark" ? "light" : "dark")}
       />
@@ -128,6 +132,8 @@ export function App({ workspace }: { workspace: KogWorkspace }) {
           onFilters={setFilters}
           groupByFolder={groupByFolder}
           onGroupByFolder={setGroupByFolder}
+          colourBy={colourBy}
+          theme={theme}
           onSelect={setSelected}
           onHover={setHovered}
         />
@@ -141,6 +147,7 @@ export function App({ workspace }: { workspace: KogWorkspace }) {
             hovered={hovered}
             labelMode={labelMode}
             groupByFolder={groupByFolder}
+            colourBy={colourBy}
             theme={theme}
             onSelect={onSelect}
             onHover={onHover}

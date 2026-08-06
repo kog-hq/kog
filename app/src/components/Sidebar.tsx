@@ -1,9 +1,11 @@
 import { AlertTriangle, EyeOff, Layers, Unplug } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Switch } from "@/components/ui/switch";
-import { CoverageMeter, Figure } from "@/components/Meter";
+import { CoverageMeter, Figure } from "@/components/meter";
 import type { KogDiagnostic, KogProject, NodeKind, ProjectIndex } from "@/lib/kog";
 import { KIND_LABEL, formatCount, formatRate } from "@/lib/kog";
+import type { ColourBy } from "@/graph/build";
+import { FOLDER_SLOTS, NEUTRAL, STATE_COLOUR, swatch } from "@/lib/palette";
 
 export type Filters = {
   /** `null` means every language; a set means only these. */
@@ -60,6 +62,8 @@ export function Sidebar({
   onFilters,
   groupByFolder,
   onGroupByFolder,
+  colourBy,
+  theme,
   onSelect,
   onHover,
 }: {
@@ -69,6 +73,8 @@ export function Sidebar({
   onFilters: (next: Filters) => void;
   groupByFolder: boolean;
   onGroupByFolder: (value: boolean) => void;
+  colourBy: ColourBy;
+  theme: "light" | "dark";
   onSelect: (id: string) => void;
   onHover: (id: string | null) => void;
 }) {
@@ -152,6 +158,58 @@ export function Sidebar({
             );
           })}
         </ul>
+      </Section>
+
+      {/* Colour carries meaning here, so it is spelled out. Which meaning
+          depends on the mode, and the list changes with it. */}
+      <Section title={colourBy === "state" ? "Colour = state" : "Colour = folder"}>
+        <ul className="flex flex-col gap-0.5">
+          {colourBy === "state"
+            ? (
+                [
+                  ["read", "read, nothing missing"],
+                  ["gap", "an import KOG could not resolve"],
+                  ["unread", "a language KOG cannot read"],
+                  ["asset", "not code"],
+                ] as const
+              ).map(([state, meaning]) => (
+                <li key={state} className="flex items-center gap-2 px-1.5 py-0.5">
+                  <span
+                    className="size-2 shrink-0 rounded-full"
+                    style={{ background: swatch(STATE_COLOUR[state], theme) }}
+                  />
+                  <span className="flex-1 truncate text-[11px] text-muted-foreground">
+                    {meaning}
+                  </span>
+                </li>
+              ))
+            : index.folders.slice(0, FOLDER_SLOTS.length + 1).map((folder) => (
+                <li key={folder.key} className="flex items-center gap-2 px-1.5 py-0.5">
+                  <span
+                    className="size-2 shrink-0 rounded-full"
+                    style={{
+                      background:
+                        folder.slot === null
+                          ? swatch(NEUTRAL, theme)
+                          : swatch(FOLDER_SLOTS[folder.slot], theme),
+                    }}
+                  />
+                  <span className="flex-1 truncate text-[11px]" title={folder.key}>
+                    {folder.slot === null ? "every other folder" : folder.key}
+                  </span>
+                  <span className="num text-[11px] text-muted-foreground">
+                    {formatCount(folder.count)}
+                  </span>
+                </li>
+              ))}
+        </ul>
+        {colourBy === "folder" && index.folders.length > FOLDER_SLOTS.length && (
+          <p className="mt-2 px-1.5 text-[11px] leading-relaxed text-muted-foreground">
+            Only three folders are coloured. A fourth hue could not stay
+            distinguishable from the other three and from both signals, so it
+            would be a colour that means nothing.
+          </p>
+        )}
       </Section>
 
       <Section title="Show">

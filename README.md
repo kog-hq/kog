@@ -1,4 +1,10 @@
+<img src="assets/logo.svg" alt="" width="72" align="left" hspace="12" vspace="4">
+
 # KOG
+
+**K**nowledge **O**rchestration **G**raph
+
+<br clear="left">
 
 Turns a codebase into a file/import graph. One binary, zero dependencies — no
 JS toolchain, no repo checkout, no server to stand up by hand.

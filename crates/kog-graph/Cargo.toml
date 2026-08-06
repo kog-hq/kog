@@ -1,5 +1,5 @@
 [package]
-name = "mycelium-graph"
+name = "kog-graph"
 description = "Turns a codebase into a file/import graph"
 version.workspace = true
 edition.workspace = true

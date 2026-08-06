@@ -28,8 +28,8 @@ jobs:
       - name: Cache
         uses: Swatinem/rust-cache@v2
 
-      # mycelium-cli embeds app/dist into the binary at compile time
-      # (crates/mycelium-cli/build.rs); the page must exist before any
+      # kog-cli embeds app/dist into the binary at compile time
+      # (crates/kog-cli/build.rs); the page must exist before any
       # cargo command that touches that crate, including fmt/clippy/test.
       - name: Install bun
         uses: oven-sh/setup-bun@v2
@@ -57,7 +57,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      # mycelium itself does not process credentials or personal data (see
+      # KOG itself does not process credentials or personal data (see
       # .gitleaks.toml) — but an accidentally committed secret (an API key
       # pasted into a fixture, a token left in a commit message) is still a
       # real incident for this repository like any other, so the whole

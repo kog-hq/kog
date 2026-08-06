@@ -261,7 +261,7 @@ impl TypeScriptExtractor {
 
     /// A package's best entry-point candidate.
     ///
-    /// Mycelium graphs source, not build output — the original design
+    /// KOG graphs source, not build output — the original design
     /// ("resolved to its `main`/`exports`, else `index.ts`") is correct for
     /// a runtime resolver but wrong here: on the acceptance target,
     /// `@mastore/shared-types` declares `main` and `exports["."].import`
@@ -795,7 +795,7 @@ export * from "./barrel";"#,
         // The real shape on the acceptance target: `main` and
         // `exports["."].import` both point at a gitignored `dist/`, while
         // `exports["."].types` points at the real TypeScript source.
-        // Mycelium graphs source, not build output, so `types` must win.
+        // KOG graphs source, not build output, so `types` must win.
         // **Load-bearing**: see the fix report for the break/restore proof.
         let dir = TempDir::new().unwrap();
         write(&dir, "package.json", r#"{ "workspaces": ["packages/*"] }"#);

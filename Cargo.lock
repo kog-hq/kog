@@ -372,6 +372,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "kog-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "kog-graph",
+ "open",
+ "rust-embed",
+ "serde_json",
+ "tempfile",
+ "tiny_http",
+]
+
+[[package]]
+name = "kog-graph"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "ignore",
+ "jsonc-parser",
+ "serde",
+ "serde_json",
+ "streaming-iterator",
+ "tempfile",
+ "thiserror",
+ "tree-sitter",
+ "tree-sitter-typescript",
+]
+
+[[package]]
 name = "libc"
 version = "0.2.189"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -409,36 +439,6 @@ checksum = "f7c44f8e672c00fe5308fa235f821cb4198414e1c77935c1ab6948d3fd78550e"
 dependencies = [
  "mime",
  "unicase",
-]
-
-[[package]]
-name = "mycelium-cli"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "mycelium-graph",
- "open",
- "rust-embed",
- "serde_json",
- "tempfile",
- "tiny_http",
-]
-
-[[package]]
-name = "mycelium-graph"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "ignore",
- "jsonc-parser",
- "serde",
- "serde_json",
- "streaming-iterator",
- "tempfile",
- "thiserror",
- "tree-sitter",
- "tree-sitter-typescript",
 ]
 
 [[package]]

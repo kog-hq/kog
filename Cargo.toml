@@ -1,12 +1,12 @@
 [workspace]
 resolver = "2"
-members = ["crates/mycelium-graph", "crates/mycelium-cli"]
+members = ["crates/kog-graph", "crates/kog-cli"]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/bstcoc/mycelium"
+repository = "https://github.com/bstcoc/kog"
 
 [workspace.dependencies]
 anyhow = "1"

@@ -2,7 +2,7 @@ import Graph from "graphology";
 import forceAtlas2 from "graphology-layout-forceatlas2";
 import Sigma from "sigma";
 
-type MyceliumNode = {
+type KogNode = {
   id: string;
   path: string;
   lang: string;
@@ -10,18 +10,18 @@ type MyceliumNode = {
   external_deps: string[];
 };
 
-type MyceliumEdge = { source: string; target: string; kind: string };
+type KogEdge = { source: string; target: string; kind: string };
 
-type MyceliumFailure = { path: string; reason: string };
+type KogFailure = { path: string; reason: string };
 
-type MyceliumDiagnostic = {
+type KogDiagnostic = {
   path: string;
   line: number;
   specifier: string;
   kind: "unresolved" | "excluded";
 };
 
-type MyceliumStats = {
+type KogStats = {
   files_discovered: number;
   files_parsed: number;
   specifiers_total: number;
@@ -32,14 +32,14 @@ type MyceliumStats = {
   resolution_rate: number;
   external_specifiers: number;
   external_packages_distinct: number;
-  failures: MyceliumFailure[];
-  diagnostics: MyceliumDiagnostic[];
+  failures: KogFailure[];
+  diagnostics: KogDiagnostic[];
 };
 
-type MyceliumGraph = {
-  nodes: MyceliumNode[];
-  edges: MyceliumEdge[];
-  stats: MyceliumStats;
+type KogGraph = {
+  nodes: KogNode[];
+  edges: KogEdge[];
+  stats: KogStats;
 };
 
 /**
@@ -77,7 +77,7 @@ async function main(): Promise<void> {
 
   const response = await fetch("/graph.json");
   if (!response.ok) throw new Error(`graph.json: ${response.status}`);
-  const data: MyceliumGraph = await response.json();
+  const data: KogGraph = await response.json();
 
   const graph = new Graph();
   for (const node of data.nodes) {

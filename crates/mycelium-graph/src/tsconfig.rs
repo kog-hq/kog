@@ -42,7 +42,9 @@ pub struct TsConfigIndex {
     /// Sorted by descending directory depth, so the nearest config wins.
     scopes: Vec<(PathBuf, Vec<PathMapping>)>,
     /// Configs that were found but could not be used, with why. Sorted by
-    /// path for reproducible output.
+    /// path for reproducible output, and deduplicated: a config reachable
+    /// through more than one `extends` chain, or both a same-directory loser
+    /// and an `extends` target, appears here exactly once.
     skipped: Vec<SkippedConfig>,
 }
 
@@ -119,8 +121,37 @@ impl TsConfigIndex {
 
         // Deepest directory first: `mappings_for` returns on the first prefix hit.
         scopes.sort_by_key(|(dir, _)| std::cmp::Reverse(dir.components().count()));
+        // The same broken config can be reached more than once — as a loser
+        // in its directory *and* as an `extends` target of its winning
+        // sibling, or from more than one `extends` chain across different
+        // directories entirely. Sorting by path first makes every visit to
+        // the same file adjacent, so `dedup_by` collapses them to one entry,
+        // keeping the first reason encountered rather than piling up
+        // repeats of the same diagnosis.
         skipped.sort_by(|a, b| a.path.cmp(&b.path));
+        skipped.dedup_by(|a, b| a.path == b.path);
         Self { scopes, skipped }
+    }
+
+    /// Read a tsconfig and parse it into its raw representation, or describe
+    /// why that failed. This is the one place that defines what "unreadable"
+    /// and "malformed" mean for a tsconfig, shared by
+    /// [`TsConfigIndex::mappings_from_chain`] (which goes on to collect
+    /// mappings) and [`TsConfigIndex::validate_config`] (which only checks
+    /// for failure), so the two can never drift apart.
+    fn read_and_parse(config_path: &Path) -> Result<RawTsConfig, SkippedConfig> {
+        let text = std::fs::read_to_string(config_path).map_err(|err| SkippedConfig {
+            path: config_path.to_path_buf(),
+            reason: err.to_string(),
+        })?;
+        jsonc_parser::parse_to_serde_value::<RawTsConfig>(
+            &text,
+            &jsonc_parser::ParseOptions::default(),
+        )
+        .map_err(|err| SkippedConfig {
+            path: config_path.to_path_buf(),
+            reason: err.to_string(),
+        })
     }
 
     /// Collect mappings from this config and everything it extends.
@@ -139,26 +170,10 @@ impl TsConfigIndex {
         if depth > 16 {
             return Vec::new();
         }
-        let text = match std::fs::read_to_string(config_path) {
-            Ok(t) => t,
-            Err(err) => {
-                skipped.push(SkippedConfig {
-                    path: config_path.to_path_buf(),
-                    reason: err.to_string(),
-                });
-                return Vec::new();
-            }
-        };
-        let raw: RawTsConfig = match jsonc_parser::parse_to_serde_value::<RawTsConfig>(
-            &text,
-            &jsonc_parser::ParseOptions::default(),
-        ) {
-            Ok(c) => c,
-            Err(err) => {
-                skipped.push(SkippedConfig {
-                    path: config_path.to_path_buf(),
-                    reason: err.to_string(),
-                });
+        let raw = match Self::read_and_parse(config_path) {
+            Ok(raw) => raw,
+            Err(skip) => {
+                skipped.push(skip);
                 return Vec::new();
             }
         };
@@ -204,25 +219,7 @@ impl TsConfigIndex {
     /// without a trace next to a healthy winner. `None` means the config is
     /// valid (whether or not it declares any `paths`); that is not a skip.
     fn validate_config(config_path: &Path) -> Option<SkippedConfig> {
-        let text = match std::fs::read_to_string(config_path) {
-            Ok(t) => t,
-            Err(err) => {
-                return Some(SkippedConfig {
-                    path: config_path.to_path_buf(),
-                    reason: err.to_string(),
-                });
-            }
-        };
-        match jsonc_parser::parse_to_serde_value::<RawTsConfig>(
-            &text,
-            &jsonc_parser::ParseOptions::default(),
-        ) {
-            Ok(_) => None,
-            Err(err) => Some(SkippedConfig {
-                path: config_path.to_path_buf(),
-                reason: err.to_string(),
-            }),
-        }
+        Self::read_and_parse(config_path).err()
     }
 
     /// Mappings that apply to a file, nearest enclosing tsconfig first.
@@ -242,7 +239,9 @@ impl TsConfigIndex {
     }
 
     /// Configs that were found but could not be used, with why. Sorted by
-    /// path.
+    /// path, and deduplicated so a config reachable more than once — as a
+    /// same-directory loser and an `extends` target, or from more than one
+    /// `extends` chain — appears here exactly once.
     pub fn skipped(&self) -> &[SkippedConfig] {
         &self.skipped
     }
@@ -471,6 +470,84 @@ mod tests {
 
         // 3. The malformed sibling contributes no mapping: the only mapping
         // present is `tsconfig.json`'s own `@/*`, already checked above.
+    }
+
+    #[test]
+    fn a_winner_extending_its_own_malformed_sibling_is_recorded_once() {
+        let dir = TempDir::new().unwrap();
+        write(
+            &dir,
+            "tsconfig.json",
+            r#"{
+                "extends": "./tsconfig.local.json",
+                "compilerOptions": { "paths": { "@/*": ["./src/*"] } }
+            }"#,
+        );
+        write(&dir, "tsconfig.local.json", "{ this is not json at all ");
+        let index = TsConfigIndex::build(dir.path());
+
+        // The winner's own paths still resolve.
+        let mappings = index.mappings_for(&dir.path().join("a.ts"));
+        assert_eq!(mappings.len(), 1);
+        assert_eq!(mappings[0].targets[0], dir.path().join("src/*"));
+
+        // `tsconfig.local.json` is reached twice: once as the losing
+        // same-directory sibling (via `validate_config`), once as the
+        // winner's own `extends` target (via `mappings_from_chain`). Without
+        // deduplication this would be 2.
+        assert_eq!(index.skipped().len(), 1);
+        assert_eq!(
+            index.skipped()[0].path,
+            dir.path().join("tsconfig.local.json")
+        );
+        assert!(!index.skipped()[0].reason.is_empty());
+    }
+
+    #[test]
+    fn a_malformed_config_reached_from_two_extends_chains_is_recorded_once() {
+        let dir = TempDir::new().unwrap();
+        write(&dir, "tsconfig.shared.json", "{ this is not json at all ");
+        write(
+            &dir,
+            "apps/a/tsconfig.json",
+            r#"{
+                "extends": "../../tsconfig.shared.json",
+                "compilerOptions": { "paths": { "@a/*": ["./src/*"] } }
+            }"#,
+        );
+        write(
+            &dir,
+            "apps/b/tsconfig.json",
+            r#"{
+                "extends": "../../tsconfig.shared.json",
+                "compilerOptions": { "paths": { "@b/*": ["./src/*"] } }
+            }"#,
+        );
+        let index = TsConfigIndex::build(dir.path());
+
+        // Both apps still resolve their own paths.
+        assert_eq!(
+            index
+                .mappings_for(&dir.path().join("apps/a/src/x.ts"))
+                .len(),
+            1
+        );
+        assert_eq!(
+            index
+                .mappings_for(&dir.path().join("apps/b/src/x.ts"))
+                .len(),
+            1
+        );
+
+        // `tsconfig.shared.json` is reached from three directions here (its
+        // own top-level discovery, and each app's `extends`); without
+        // deduplication it would appear more than once.
+        let shared_skips: Vec<&SkippedConfig> = index
+            .skipped()
+            .iter()
+            .filter(|s| s.path == dir.path().join("tsconfig.shared.json"))
+            .collect();
+        assert_eq!(shared_skips.len(), 1);
     }
 
     #[test]

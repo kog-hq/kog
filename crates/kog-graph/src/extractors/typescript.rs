@@ -15,7 +15,13 @@ const IMPORT_QUERY: &str = r#"
 "#;
 
 /// Extension probes, in order, for a specifier that has none.
-const EXTENSION_ORDER: &[&str] = &["ts", "tsx", "js", "jsx", "mts", "cts"];
+///
+/// `d.ts` comes last on purpose: it is a declaration file, so a real
+/// `types.ts` beside a `types.d.ts` must win. It has to be here at all
+/// because a module can exist *only* as a declaration — TanStack Query's
+/// Vue examples import `./types`, which is `types.d.ts` on disk, and
+/// leaving it out reported ten real imports as broken across the repository.
+const EXTENSION_ORDER: &[&str] = &["ts", "tsx", "js", "jsx", "mts", "cts", "d.ts"];
 
 /// Directory index probes, in order. Narrower than `EXTENSION_ORDER` on
 /// purpose: design doc §6 specifies `<dir>/index.{ts,tsx,js,jsx}` for the
@@ -970,6 +976,44 @@ export * from "./barrel";"#,
         assert_eq!(e.lang_for(Path::new("src/a.jsx")), "javascript");
         assert_eq!(e.lang_for(Path::new("src/a.mjs")), "javascript");
         assert_eq!(e.lang_for(Path::new("src/a.cjs")), "javascript");
+    }
+
+    /// A module that exists only as a declaration file. Found on
+    /// TanStack Query, whose Vue examples import `./types` where the file
+    /// on disk is `types.d.ts`.
+    #[test]
+    fn a_specifier_naming_a_declaration_only_module_resolves() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join("src")).unwrap();
+        fs::write(dir.path().join("src/types.d.ts"), "export type A = 1;").unwrap();
+        fs::write(dir.path().join("src/app.ts"), "").unwrap();
+        let e = TypeScriptExtractor::new(dir.path());
+        let importer = dir.path().canonicalize().unwrap().join("src/app.ts");
+
+        let resolution = e.resolve("./types", &importer);
+        assert!(
+            matches!(resolution, Resolution::Internal(ref p) if p.ends_with("types.d.ts")),
+            "got {resolution:?}"
+        );
+    }
+
+    /// A real module beside its own declaration file must win: the source
+    /// is what the graph is about.
+    #[test]
+    fn a_real_module_wins_over_its_declaration_file() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join("src")).unwrap();
+        fs::write(dir.path().join("src/types.ts"), "export const a = 1;").unwrap();
+        fs::write(dir.path().join("src/types.d.ts"), "export type A = 1;").unwrap();
+        fs::write(dir.path().join("src/app.ts"), "").unwrap();
+        let e = TypeScriptExtractor::new(dir.path());
+        let importer = dir.path().canonicalize().unwrap().join("src/app.ts");
+
+        let resolution = e.resolve("./types", &importer);
+        assert!(
+            matches!(resolution, Resolution::Internal(ref p) if p.ends_with("src/types.ts")),
+            "got {resolution:?}"
+        );
     }
 
     // --- Resolution rule 3: workspace packages (design doc §6) ---

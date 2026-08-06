@@ -54,10 +54,13 @@ fn is_remote(target: &str) -> bool {
         || target.starts_with("tel:")
         || target.starts_with("javascript:")
         // A framework's own template syntax, not a path: `{{ url }}`,
-        // `{% static %}`, `<%= asset %>`, `${href}`.
+        // `{% static %}`, `<%= asset %>`, `${href}`, and SvelteKit's
+        // `%sveltekit.assets%/favicon.png` — the placeholder is substituted
+        // at build time, so no file of that name has ever existed.
         || target.starts_with('{')
         || target.starts_with("<%")
         || target.starts_with("${")
+        || (target.starts_with('%') && target[1..].contains('%'))
 }
 
 /// Directories a build tool serves at the URL root. `/favicon.svg` in a
@@ -392,6 +395,8 @@ mod tests {
             "#main",
             "mailto:a@b.c",
             "{{ url_for('static') }}",
+            // SvelteKit substitutes this at build time; no file is named that.
+            "%sveltekit.assets%/favicon.png",
         ] {
             assert!(
                 matches!(e.resolve(raw, &importer), Resolution::External(_)),

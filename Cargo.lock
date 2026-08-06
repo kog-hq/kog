@@ -313,6 +313,7 @@ dependencies = [
  "clap",
  "mycelium-graph",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]

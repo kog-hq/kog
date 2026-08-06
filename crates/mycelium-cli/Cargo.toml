@@ -15,3 +15,6 @@ anyhow.workspace = true
 clap.workspace = true
 mycelium-graph = { path = "../mycelium-graph" }
 serde_json.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

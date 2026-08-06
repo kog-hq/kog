@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 /// Directories that are never source, whatever `.gitignore` says.
-pub const ALWAYS_SKIP: &[&str] = &[
+const ALWAYS_SKIP: &[&str] = &[
     "node_modules",
     "target",
     "dist",
@@ -111,13 +111,46 @@ mod tests {
     }
 
     #[test]
-    fn discovered_paths_are_absolute() {
+    fn discovered_paths_are_canonical() {
+        // Test that canonicalize() normalizes paths to remove `..` components.
+        // Pass a non-canonical absolute path (containing `..`) to discover, and
+        // verify that results match those from the canonical path directly.
         let dir = TempDir::new().unwrap();
         write(&dir, "a.ts", "");
-        let found = discover(dir.path(), &["ts"]);
-        assert!(!found.is_empty());
-        for path in found {
-            assert!(path.is_absolute(), "path should be absolute: {:?}", path);
+
+        // Canonical root: dir.path() is always absolute
+        let canonical_root = dir.path();
+        let found_canonical = discover(canonical_root, &["ts"]);
+
+        // Non-canonical root: add a subdir and `..` to backtrack
+        let subdir = dir.path().join("subdir");
+        fs::create_dir(&subdir).unwrap();
+        let noncanonical_root = subdir.join("..");
+
+        // Without canonicalize(), the non-canonical path would return paths with `..`
+        // inside them; with canonicalize(), they should be identical.
+        let found_noncanonical = discover(&noncanonical_root, &["ts"]);
+
+        // Both should find the same file with identical paths
+        assert_eq!(
+            found_canonical, found_noncanonical,
+            "canonical and non-canonical roots should produce identical results"
+        );
+
+        // Verify both are absolute
+        for path in &found_canonical {
+            assert!(
+                path.is_absolute(),
+                "canonical path should be absolute: {:?}",
+                path
+            );
+        }
+        for path in &found_noncanonical {
+            assert!(
+                path.is_absolute(),
+                "non-canonical path should still be absolute after canonicalize: {:?}",
+                path
+            );
         }
     }
 
@@ -130,6 +163,30 @@ mod tests {
         write(&dir, "target/debug/x.ts", "");
         let found = discover(dir.path(), &["ts"]);
         assert_eq!(found.len(), 1);
+    }
+
+    #[test]
+    fn always_skip_and_gitignore_filters_are_independent() {
+        // Prove that ALWAYS_SKIP works regardless of what .gitignore says.
+        // Create a .gitignore that does NOT exclude node_modules (it explicitly
+        // allows it with a negation pattern), yet node_modules should still be
+        // excluded by the hard-coded skip list.
+        let dir = TempDir::new().unwrap();
+        // Write a .gitignore that ignores 'generated/' but explicitly allows node_modules
+        write(&dir, ".gitignore", "generated/\n!node_modules/\n");
+        write(&dir, "src/a.ts", "");
+        write(&dir, "node_modules/pkg/index.ts", "");
+        write(&dir, "generated/auto.ts", "");
+
+        let found = discover(dir.path(), &["ts"]);
+
+        // Only src/a.ts should be found:
+        // - src/a.ts: kept (normal source)
+        // - node_modules/pkg/index.ts: excluded by ALWAYS_SKIP, despite gitignore
+        //   allowing it
+        // - generated/auto.ts: excluded by gitignore
+        assert_eq!(found.len(), 1, "only src/a.ts should be found");
+        assert!(found[0].ends_with("src/a.ts"));
     }
 
     #[test]

@@ -63,14 +63,28 @@ is worth less than one that reads two more languages, so the MCP server went fir
 The gap list is the roadmap now: whatever the coverage report names most often across real
 repositories is what gets read next. Ordered by what shows up:
 
-- **SQL** and **MDX** — the two largest gaps on documenso, 306 files between them
+- **MDX** — shipped. Measured at 0.9982 on [`withastro/docs`](https://github.com/withastro/docs),
+  where it resolves 3,337 internal imports into 3,337 edges. Fenced code samples are
+  excluded: documenso's embedding guides show `import … from '@documenso/embed-react'`
+  inside a code block, and that package is real, so reading samples would have put
+  fourteen fabricated edges into a published graph.
+- **SQL** — deliberately not read, and this is the measurement rather than a plan.
+  All 163 `.sql` files on documenso are Prisma migrations: 0 psql `\i`/`\ir` includes,
+  0 naming another `.sql` file. An extractor would add 163 nodes with no edges and move
+  source coverage five points without adding information. It becomes worth doing when a
+  repository shows a real mechanism — psql includes, or dbt `{{ ref() }}` — not when the
+  file count gets big enough.
 - **Kotlin** — the same package-path rule as Java, on a grammar not yet wired in
 - **Scala**, **Elixir**, **Dart**, **Lua**
 - **Swift** — blocked, and honestly so: a Swift file imports no other file in its module,
   so a file-level graph of it is nodes and no edges. It needs symbol granularity, which is
   its own project.
 
-A language ships when it passes its own resolution gate, not when its grammar compiles.
+A language ships when it passes its own resolution gate, not when its grammar compiles —
+and as of 2026-08-07 that gate is a real repository per language rather than a unit test.
+The first run of that corpus found Go at **0.1261** on `cli/cli`; see
+[`docs/measurements/2026-08-07-a-real-corpus.md`](docs/measurements/2026-08-07-a-real-corpus.md).
+C++ is at 0.8732 and is not yet fixed.
 
 ---
 

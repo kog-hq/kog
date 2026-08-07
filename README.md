@@ -172,12 +172,30 @@ which is a policy decision, not a parser failure. Documentation, data and images
 the coverage denominator for the same reason: a repository is not worse mapped for
 containing a README.
 
-Measured on two public repositories, at a commit you can check out yourself:
+Measured on eleven public repositories, each pinned to a commit you can check out
+yourself — one per language KOG claims, because a language that has never met real code
+does not have a rate, it has a passing unit test. Full evidence, including the commits:
+[`docs/measurements/`](docs/measurements/).
 
-| Repository | Files seen | Analysed | Not read | Source coverage | Resolution rate |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| [documenso/documenso](https://github.com/documenso/documenso) | 2,833 | 2,100 | 307 | **0.8725** | **0.9779** |
-| [TanStack/query](https://github.com/TanStack/query) | 2,314 | 1,276 | 0 | **1.0000** | **0.9926** |
+| Repository | Language | Files seen | Analysed | Not read | Source coverage | Resolution rate |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| [withastro/docs](https://github.com/withastro/docs) | Astro, MDX | 2,941 | 2,701 | 0 | **1.0000** | **0.9975** |
+| [cli/cli](https://github.com/cli/cli) | Go | 1,338 | 927 | 7 | **0.9925** | **1.0000** |
+| [curl/curl](https://github.com/curl/curl) | C | 4,437 | 1,097 | 108 | **0.9104** | **0.9705** |
+| [JamesNK/Newtonsoft.Json](https://github.com/JamesNK/Newtonsoft.Json) | C# | 988 | 945 | 0 | **1.0000** | **1.0000** |
+| [google/gson](https://github.com/google/gson) | Java | 314 | 264 | 4 | **0.9851** | **1.0000** |
+| [pallets/flask](https://github.com/pallets/flask) | Python | 236 | 106 | 4 | **0.9636** | **0.9970** |
+| [BurntSushi/ripgrep](https://github.com/BurntSushi/ripgrep) | Rust | 236 | 114 | 2 | **0.9828** | **0.9734** |
+| [sinatra/sinatra](https://github.com/sinatra/sinatra) | Ruby | 292 | 155 | 6 | **0.9627** | **1.0000** |
+| [slimphp/Slim](https://github.com/slimphp/Slim) | PHP | 145 | 125 | 0 | **1.0000** | **0.9807** |
+| [fmtlib/fmt](https://github.com/fmtlib/fmt) | C++ | 142 | 79 | 5 | **0.9405** | **0.8571** |
+| [documenso/documenso](https://github.com/documenso/documenso) | TypeScript | 2,833 | 2,243 | 164 | **0.9319** | **0.9779** |
+
+Broadening that corpus from two repositories to eleven immediately found a resolver
+publishing **0.1261**: on `cli/cli`, Go resolved 432 of 3,427 of its own imports, because
+the repository ships a CodeQL fixture whose `go.mod` repeats the real module line and the
+resolver picked the wrong one. It now resolves all 3,427. That is the argument for
+measuring per language, made against this tool rather than by it.
 
 And a rate per language, because an aggregate lets a broken resolver hide behind a
 majority language that works. On TanStack/query:
@@ -219,10 +237,18 @@ Full breakdown, with the raw output and every gap categorised, in
 Stated plainly, because a tool that only advertises its strengths is not measuring anything.
 
 - **Sixteen languages, not all of them.** TypeScript, JavaScript, Vue, Svelte, Astro, Go,
-  Python, Rust, C, C++, Java, C#, Ruby, PHP, HTML, CSS/Sass/Less and shell. Everything
-  else is a node in the graph and a named line in the coverage report — SQL, MDX, Swift,
-  Kotlin, Scala, Elixir — but its own imports are not read. The report says which, and
-  how many.
+  Python, Rust, C, C++, Java, C#, Ruby, PHP, MDX, HTML, CSS/Sass/Less and shell.
+  Everything else is a node in the graph and a named line in the coverage report — SQL,
+  Swift, Kotlin, Scala, Elixir — but its own imports are not read. The report says which,
+  and how many.
+- **C++ is at 0.8732 and is not fixed.** Every unresolved specifier on `fmtlib/fmt` is a
+  third-party header (`gtest`, `gmock`, `absl`) that should count as a dependency and
+  leave the denominator; instead it is probed as internal and fails closed. Published
+  rather than rounded away.
+- **SQL is deliberately not read.** All 163 `.sql` files on documenso are Prisma
+  migrations, and migrations do not reference one another: 0 psql includes, 0 files
+  naming another. An extractor would add 163 nodes with no edges and move source coverage
+  five points without adding a single piece of information.
 - **Files, not symbols.** Nodes are files, edges are static imports. Call graphs need a
   type checker to be right, and a wrong call graph is worse than a coarse import graph.
 - **No dynamic `import()`**, no `require()`, no run-time path assembly. A shell `source
@@ -237,7 +263,8 @@ Stated plainly, because a tool that only advertises its strengths is not measuri
   than reporting a zero that reads like a fact about the repository.
 - **A scan is a snapshot.** `kog mcp` reads the tree once at startup; edits after that are
   invisible until it is restarted.
-- **Two repositories is not a corpus.** The rates above are two data points.
+- **Eleven repositories is not a corpus either.** It is one project per language, chosen
+  by the author of the tool. Better than two; still not a sample.
 
 # Stack
 

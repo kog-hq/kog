@@ -149,24 +149,23 @@
 }
 
 @layer utilities {
-  /* Panels float over a canvas that runs edge to edge, so the map is never
-     boxed in by the instrument reading it. Translucent rather than opaque:
-     the graph continuing behind a panel is what tells you it is one surface
-     and not four. */
-  .glass {
-    background: color-mix(in srgb, var(--card) 82%, transparent);
-    border: 1px solid color-mix(in srgb, var(--border) 90%, transparent);
+  /* Panels sit over a canvas that runs edge to edge. Opaque, not frosted:
+     on a graph this dense a blur turns everything behind the panel to soup,
+     and reading over it for an hour is tiring. A crisp edge and a shadow
+     separate better than translucency does. */
+  .surface {
+    background: var(--card);
+    border: 1px solid var(--border);
     border-radius: 12px;
-    backdrop-filter: blur(18px) saturate(140%);
     box-shadow:
-      0 1px 2px rgb(0 0 0 / 0.04),
-      0 12px 32px -12px rgb(0 0 0 / 0.18);
+      0 1px 2px rgb(0 0 0 / 0.05),
+      0 10px 30px -12px rgb(0 0 0 / 0.22);
   }
 
-  :root[data-theme="dark"] .glass {
+  :root[data-theme="dark"] .surface {
     box-shadow:
-      0 1px 2px rgb(0 0 0 / 0.4),
-      0 16px 40px -16px rgb(0 0 0 / 0.7);
+      0 1px 2px rgb(0 0 0 / 0.5),
+      0 14px 36px -14px rgb(0 0 0 / 0.8);
   }
 
   /* The inspector arrives from the edge it lives on. */

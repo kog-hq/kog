@@ -6,15 +6,9 @@ import {
 } from "@/graph/graph-canvas";
 import { FindFile } from "@/components/find-file";
 import { Inspector } from "@/components/inspector";
-import { Sidebar, type Filters } from "@/components/sidebar";
-import { TopRail } from "@/components/top-rail";
-import {
-  indexProject,
-  formatCount,
-  formatRate,
-  type KogWorkspace,
-  type NodeKind,
-} from "@/lib/kog";
+import { Rail } from "@/components/rail";
+import { NO_FILTERS, type Filters } from "@/components/panels";
+import { indexProject, type KogWorkspace } from "@/lib/kog";
 
 type Theme = "light" | "dark";
 
@@ -28,8 +22,6 @@ function storedTheme(): Theme {
     : "dark";
 }
 
-const ALL_KINDS: NodeKind[] = ["source", "unread_source", "asset"];
-
 export function App({ workspace }: { workspace: KogWorkspace }) {
   const [projectIndex, setProjectIndex] = useState(0);
   const [theme, setTheme] = useState<Theme>(storedTheme);
@@ -37,12 +29,7 @@ export function App({ workspace }: { workspace: KogWorkspace }) {
   const [hovered, setHovered] = useState<string | null>(null);
   const [searching, setSearching] = useState(false);
   const [groupByFolder, setGroupByFolder] = useState(false);
-  const [filters, setFilters] = useState<Filters>({
-    languages: null,
-    kinds: new Set(ALL_KINDS),
-    hideIsolated: false,
-    onlyUnresolved: false,
-  });
+  const [filters, setFilters] = useState<Filters>(NO_FILTERS);
 
   const project = workspace.projects[projectIndex];
   const index = useMemo(() => indexProject(project), [project]);
@@ -85,7 +72,7 @@ export function App({ workspace }: { workspace: KogWorkspace }) {
   const visible = useMemo(() => {
     const everything =
       filters.languages === null &&
-      filters.kinds.size === ALL_KINDS.length &&
+      filters.kinds.size === NO_FILTERS.kinds.size &&
       !filters.hideIsolated &&
       !filters.onlyUnresolved;
     if (everything) return null;
@@ -116,99 +103,59 @@ export function App({ workspace }: { workspace: KogWorkspace }) {
   const onSelect = useCallback((id: string | null) => setSelected(id), []);
   const onHover = useCallback((id: string | null) => setHovered(id), []);
 
-  const stats = project.graph.stats;
-
   return (
-    // The canvas runs the full window, and every panel floats over it. A map
-    // squeezed into the space four opaque columns left over is a smaller map.
-    <div className="relative h-full overflow-hidden">
-      <GraphCanvas
-        project={project}
-        index={index}
-        visible={visible}
-        selected={selected}
-        hovered={hovered}
-        labelMode={labelMode}
-        groupByFolder={groupByFolder}
-        theme={theme}
-        onSelect={onSelect}
-        onHover={onHover}
-      />
-
-      <TopRail
+    // The canvas runs the full window and nothing sits on it by default. The
+    // instrument reading a map should not be bigger than the map.
+    <div className="flex h-full overflow-hidden">
+      <Rail
         workspace={workspace}
         project={project}
+        index={index}
         onProject={setProjectIndex}
         onSearch={() => setSearching(true)}
-        labelMode={labelMode}
-        onLabelMode={setLabelMode}
-        theme={theme}
-        onTheme={() => setTheme(theme === "dark" ? "light" : "dark")}
-      />
-
-      <Sidebar
-        project={project}
-        index={index}
         filters={filters}
         onFilters={setFilters}
         groupByFolder={groupByFolder}
         onGroupByFolder={setGroupByFolder}
+        labelMode={labelMode}
+        onLabelMode={setLabelMode}
         theme={theme}
+        onTheme={() => setTheme(theme === "dark" ? "light" : "dark")}
         onSelect={setSelected}
         onHover={setHovered}
       />
 
-      {project.graph.edges.length === 0 && (
-        <p className="pointer-events-none absolute inset-x-0 top-1/2 mx-auto max-w-md -translate-y-1/2 px-6 text-center text-[12px] leading-relaxed text-muted-foreground">
-          No file in this project imports another. Every dot is real — there is
-          simply nothing connecting them, which is worth knowing.
-        </p>
-      )}
-
-      {selectedNode && (
-        <Inspector
-          node={selectedNode}
+      <main className="relative min-w-0 flex-1">
+        <GraphCanvas
+          project={project}
           index={index}
-          onSelect={setSelected}
-          onHover={setHovered}
-          onClose={() => setSelected(null)}
+          visible={visible}
+          selected={selected}
+          hovered={hovered}
+          labelMode={labelMode}
+          groupByFolder={groupByFolder}
+          theme={theme}
+          onSelect={onSelect}
+          onHover={onHover}
         />
-      )}
 
-      <footer className="glass absolute bottom-3 left-3 right-3 flex h-8 items-center gap-4 px-3 text-[11px] text-muted-foreground">
-        <span className="num">
-          <span className="text-foreground">
-            {formatCount(stats.coverage.files_seen)}
-          </span>{" "}
-          files
-        </span>
-        <span className="num">
-          <span className="text-foreground">
-            {formatCount(project.graph.edges.length)}
-          </span>{" "}
-          edges
-        </span>
-        <span className="num">
-          <span className="text-foreground">
-            {formatRate(stats.resolution_rate)}
-          </span>{" "}
-          resolution
-        </span>
-        {stats.coverage.files_unsupported > 0 && (
-          <span className="num text-signal">
-            {formatCount(stats.coverage.files_unsupported)} files not read
-          </span>
+        {project.graph.edges.length === 0 && (
+          <p className="pointer-events-none absolute inset-x-0 top-1/2 mx-auto max-w-md -translate-y-1/2 px-6 text-center text-[12px] leading-relaxed text-muted-foreground">
+            No file in this project imports another. Every dot is real — there
+            is simply nothing connecting them, which is worth knowing.
+          </p>
         )}
-        {visible && (
-          <span className="num">
-            showing {formatCount(visible.size)} of{" "}
-            {formatCount(project.graph.nodes.length)}
-          </span>
+
+        {selectedNode && (
+          <Inspector
+            node={selectedNode}
+            index={index}
+            onSelect={setSelected}
+            onHover={setHovered}
+            onClose={() => setSelected(null)}
+          />
         )}
-        <span className="ml-auto truncate" title={project.path}>
-          {project.path}
-        </span>
-      </footer>
+      </main>
 
       <FindFile
         open={searching}

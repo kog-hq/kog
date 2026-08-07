@@ -48,7 +48,13 @@ export function buildGraph(
 ): Graph {
   const graph = new Graph({ type: "directed", multi: false });
 
-  const add = (id: string, label: string, lang: string, kind: NodeKind, members: string[]) => {
+  const add = (
+    id: string,
+    label: string,
+    lang: string,
+    kind: NodeKind,
+    members: string[],
+  ) => {
     graph.addNode(id, {
       label,
       size: 2,
@@ -81,9 +87,11 @@ export function buildGraph(
         if (!node) continue;
         langs.set(node.lang, (langs.get(node.lang) ?? 0) + 1);
         if (node.kind === "source") kind = "source";
-        else if (node.kind === "unread_source" && kind === "asset") kind = "unread_source";
+        else if (node.kind === "unread_source" && kind === "asset")
+          kind = "unread_source";
       }
-      const lang = [...langs.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "";
+      const lang =
+        [...langs.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "";
       add(folder, folder, lang, kind, files);
     }
     for (const edge of project.graph.edges) {
@@ -94,7 +102,9 @@ export function buildGraph(
     }
   } else {
     for (const node of project.graph.nodes) {
-      add(node.id, index.label.get(node.id) ?? node.id, node.lang, node.kind, [node.id]);
+      add(node.id, index.label.get(node.id) ?? node.id, node.lang, node.kind, [
+        node.id,
+      ]);
     }
     for (const edge of project.graph.edges) {
       if (graph.hasNode(edge.source) && graph.hasNode(edge.target)) {
@@ -127,4 +137,3 @@ export function buildGraph(
 
   return graph;
 }
-

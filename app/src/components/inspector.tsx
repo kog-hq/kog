@@ -89,7 +89,7 @@ export function Inspector({
   const diagnostics = index.diagnosticsByFile.get(node.id) ?? [];
 
   return (
-    <aside className="glass slide-in scrollbar-slim absolute bottom-11 right-3 top-[60px] flex w-[304px] flex-col overflow-y-auto">
+    <aside className="surface slide-in scrollbar-slim absolute bottom-4 right-4 top-4 z-10 flex w-[312px] flex-col overflow-y-auto">
       <header className="flex items-start gap-2 px-3 py-3">
         <div className="min-w-0 flex-1">
           <h2 className="break-all text-[13px] leading-snug text-foreground">

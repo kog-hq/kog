@@ -87,7 +87,8 @@ function toHsl(hex: string): [number, number, number] {
 function toHex(h: number, s: number, l: number): string {
   const k = (n: number) => (n + h / 30) % 12;
   const a = s * Math.min(l, 1 - l);
-  const f = (n: number) => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+  const f = (n: number) =>
+    l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
   const channel = (n: number) =>
     Math.round(Math.min(1, Math.max(0, f(n))) * 255)
       .toString(16)
@@ -113,7 +114,8 @@ const SHADE_RANGE = 0.11;
 function shade(hex: string, seed: string, theme: Theme): string {
   if (!seed) return hex;
   let hash = 0;
-  for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
+  for (let i = 0; i < seed.length; i++)
+    hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
   const [h, s, l] = toHsl(hex);
   const offset = ((hash % 1000) / 500 - 1) * SHADE_RANGE;
   const floor = theme === "dark" ? 0.44 : 0.28;

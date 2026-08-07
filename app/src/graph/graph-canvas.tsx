@@ -471,7 +471,13 @@ export function GraphCanvas(props: Props) {
       }
       if (focus) {
         if (node === focus.anchor) {
-          return { ...data, color: fill, size: size * 1.3, zIndex: 3, forceLabel: true };
+          return {
+            ...data,
+            color: fill,
+            size: size * 1.3,
+            zIndex: 3,
+            forceLabel: true,
+          };
         }
         if (focus.uses.has(node) || focus.usedBy.has(node)) {
           return {
@@ -494,7 +500,12 @@ export function GraphCanvas(props: Props) {
         };
       }
       if (glow > 0) {
-        return { ...data, color: lit(fill, glow), size: size * (1 + glow * 0.5), zIndex: 2 };
+        return {
+          ...data,
+          color: lit(fill, glow),
+          size: size * (1 + glow * 0.5),
+          zIndex: 2,
+        };
       }
       return { ...data, color: fill, size };
     });

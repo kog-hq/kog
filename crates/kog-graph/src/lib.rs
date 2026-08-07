@@ -7,6 +7,7 @@ pub mod extractors;
 pub mod graph;
 pub mod model;
 pub mod project;
+pub mod query;
 pub mod registry;
 pub mod tsconfig;
 
@@ -19,6 +20,10 @@ pub use model::{
     Coverage, Diagnostic, DiagnosticKind, Edge, EdgeKind, ExclusionReason, ExtensionCoverage,
     Failure, FileStatus, Graph, LangStats, Node, SkippedDirectory, Stats, MAX_DIAGNOSTICS,
 };
-pub use project::{scan_workspace, Project, ProjectKind, Workspace};
+pub use project::{scan_workspace, Project, ProjectKind, Totals, Workspace};
+pub use query::{
+    render, Answer, Atlas, BlastRadius, Direction, FileHit, FileRef, Listing, Located, Neighbours,
+    NotAQuestion, PackageUse, Question, Summary, DEFAULT_DEPTH, DEFAULT_LIMIT, QUESTION_FORMS,
+};
 pub use registry::Registry;
 pub use tsconfig::{PathMapping, SkippedConfig, TsConfigIndex};

@@ -109,12 +109,24 @@ function parkIsolated(graph: Graph): void {
     maxY = 0;
   }
 
-  const width = Math.max(maxX - minX, 200);
   const step = 13;
-  const perRow = Math.max(8, Math.floor(width / step));
+  // A block about as wide as it is tall, never wider than the graph above it.
+  //
+  // It used to fill the full width in a single row, which reads fine until
+  // you filter: ask for a language whose files import nothing — 56 `.sql`
+  // files, say — and the camera has to zoom out to the width of the entire
+  // graph to hold a strip one node high, so the answer arrives as a dotted
+  // line too small to see. A compact block frames at a useful zoom.
+  const widest = Math.max(4, Math.floor(Math.max(maxX - minX, 200) / step));
+  const perRow = Math.min(widest, Math.ceil(Math.sqrt(isolated.length * 1.6)));
+  const left = (minX + maxX) / 2 - ((perRow - 1) * step) / 2;
   isolated.forEach((node, index) => {
-    graph.setNodeAttribute(node, "x", minX + (index % perRow) * step);
-    graph.setNodeAttribute(node, "y", maxY + 70 + Math.floor(index / perRow) * step);
+    graph.setNodeAttribute(node, "x", left + (index % perRow) * step);
+    graph.setNodeAttribute(
+      node,
+      "y",
+      maxY + 70 + Math.floor(index / perRow) * step,
+    );
   });
 }
 
@@ -214,7 +226,9 @@ export function buildGraph(
 
   const order = graph.order;
   forceAtlas2.assign(graph, {
-    iterations: order > 2000 ? 160 : order > 700 ? 260 : 380,
+    // More repulsion needs more time to settle: cut the run short and the
+    // clusters are still on their way apart when the picture is taken.
+    iterations: order > 2000 ? 240 : order > 700 ? 420 : 380,
     settings: {
       ...forceAtlas2.inferSettings(graph),
       // Gravity near zero: the default pulls everything back into one disc,
@@ -222,7 +236,14 @@ export function buildGraph(
       // holds it together is the edges, and they are enough.
       gravity: 0.02,
       // Room between clusters, and no overlapping discs inside them.
-      scalingRatio: 14,
+      //
+      // Scaled with the graph: at 14 a 900-node, 3,000-edge repository packed
+      // its clusters until they touched, and every edge running between two
+      // of them crossed the same few hundred pixels. No amount of thinning
+      // the ink fixes that — the strokes still overlap, they just overlap
+      // fainter. Space is the fix; thin ink is what keeps it calm once there
+      // is space.
+      scalingRatio: order > 700 ? 32 : order > 250 ? 22 : 14,
       adjustSizes: true,
       // Hubs are pushed to the edge of their own cluster instead of sitting
       // on top of it, which is what makes a cluster's shape readable.

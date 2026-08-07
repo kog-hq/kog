@@ -93,9 +93,19 @@ export function App({ workspace }: { workspace: KogWorkspace }) {
     const keep = new Set<string>();
     for (const node of project.graph.nodes) {
       if (!filters.kinds.has(node.kind)) continue;
-      if (hiddenCommunities.has(communities.byNode.get(node.id) ?? -1))
+      const community = communities.byNode.get(node.id);
+      if (community !== undefined && hiddenCommunities.has(community)) continue;
+      // Only code answers to the language filter. An asset's `lang` is a file
+      // family — `image`, `font`, `documentation` — and none of those are in
+      // the language list, so testing them against it silently removed all 71
+      // assets the moment any one language was unticked. Assets have their
+      // own checkbox, under Show.
+      if (
+        filters.languages &&
+        node.kind !== "asset" &&
+        !filters.languages.has(node.lang)
+      )
         continue;
-      if (filters.languages && !filters.languages.has(node.lang)) continue;
       if (filters.hideIsolated && (index.degree.get(node.id) ?? 0) === 0)
         continue;
       if (filters.onlyUnresolved && !index.diagnosticsByFile.has(node.id))
@@ -116,7 +126,6 @@ export function App({ workspace }: { workspace: KogWorkspace }) {
 
   const selectedNode = selected ? index.byId.get(selected) : undefined;
   const onSelect = useCallback((id: string | null) => setSelected(id), []);
-  const onHover = useCallback((id: string | null) => setHovered(id), []);
 
   return (
     // The canvas runs the full window and nothing sits on it by default. The
@@ -158,7 +167,6 @@ export function App({ workspace }: { workspace: KogWorkspace }) {
           colourBy={colourBy}
           theme={theme}
           onSelect={onSelect}
-          onHover={onHover}
         />
 
         {project.graph.edges.length === 0 && (

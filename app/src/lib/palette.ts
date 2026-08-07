@@ -187,32 +187,91 @@ export const CANVAS: Record<
     background: string;
     edge: string;
     edgeMuted: string;
+    /** A node pushed into the background while another is being read. */
+    dim: string;
     label: string;
     labelHalo: string;
     focus: string;
-    /** The wave that runs out through a selection's dependents. */
-    pulse: string;
   }
 > = {
   dark: {
     background: "#0d0d0f",
     edge: "#3a3d47",
     edgeMuted: "#21232a",
+    dim: "#26282f",
     label: "#e8e8ea",
     labelHalo: "rgba(13,13,15,0.82)",
     focus: "#f4f5f8",
-    pulse: "#8fb8ff",
   },
   light: {
     background: "#fbfbfd",
     edge: "#b4b8c4",
     edgeMuted: "#e3e5ec",
+    dim: "#dcdee6",
     label: "#15151a",
     labelHalo: "rgba(251,251,253,0.86)",
     focus: "#101014",
-    pulse: "#2f6fd0",
   },
 };
+
+/** The ink an edge is drawn with at full strength, before any thinning. */
+const EDGE_INK: Record<Theme, string> = {
+  dark: "#5c6170",
+  light: "#7a808f",
+};
+
+/** Straight RGB blend, `weight` of `hex` over `onto`. */
+function mix(hex: string, onto: string, weight: number): string {
+  const from = Number.parseInt(hex.slice(1), 16);
+  const to = Number.parseInt(onto.slice(1), 16);
+  const channel = (shift: number) => {
+    const a = (from >> shift) & 0xff;
+    const b = (to >> shift) & 0xff;
+    return Math.round(b + (a - b) * weight)
+      .toString(16)
+      .padStart(2, "0");
+  };
+  return `#${channel(16)}${channel(8)}${channel(0)}`;
+}
+
+/**
+ * How an edge is drawn in a graph of this many edges: its colour and its
+ * width, which come down together as the graph gets denser.
+ *
+ * Three thousand curves at the ink a hundred can carry do not read as three
+ * thousand relationships — they read as fog, and the fog is thickest exactly
+ * where the graph is busiest and most worth reading.
+ *
+ * The colour is **opaque, mixed towards the background** rather than
+ * translucent, and that is not a style preference. Sigma's curved-edge program
+ * discards the alpha channel: an `rgba(…, 0.05)` edge draws at full strength,
+ * which is why an earlier attempt to thin the fog by dropping alpha from 0.55
+ * to 0.05 changed nothing on screen. Blending here, in the colour we hand it,
+ * is the only way to control how bright a dense core comes out — and because
+ * the strokes are opaque they overwrite instead of accumulating, so the value
+ * chosen is exactly the value drawn, however many edges cross.
+ *
+ * It steps rather than slides: a continuous function would make two scans of
+ * the same repository a week apart look subtly different for no reason a
+ * reader could name.
+ */
+export function edgeInk(
+  edges: number,
+  theme: Theme,
+): { color: string; size: number } {
+  const [weight, size] =
+    edges <= 400
+      ? [0.9, 0.45]
+      : edges <= 1200
+        ? [0.6, 0.36]
+        : edges <= 2500
+          ? [0.4, 0.28]
+          : [0.28, 0.24];
+  return {
+    color: mix(EDGE_INK[theme], CANVAS[theme].background, weight),
+    size,
+  };
+}
 
 export type CanvasTheme = (typeof CANVAS)[Theme] & { mode: Theme };
 

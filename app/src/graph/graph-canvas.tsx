@@ -3,14 +3,14 @@ import { EdgeCurvedArrowProgram } from "@sigma/edge-curve";
 import { EdgeArrowProgram } from "sigma/rendering";
 import type { Settings } from "sigma/settings";
 import type { NodeDisplayData, PartialButFor } from "sigma/types";
-import { useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { createNodeBorderProgram } from "@sigma/node-border";
-import { CursorField } from "./cursor-field";
 import { buildGraph, type ColourBy } from "./build";
 import type { Communities } from "./communities";
 import {
   canvasTheme,
   communityColour,
+  edgeInk,
   languageColour,
   shadeKey,
   type CanvasTheme,
@@ -38,19 +38,6 @@ export function defaultLabelMode(nodeCount: number): LabelMode {
   return "hubs";
 }
 
-/** How long the graph takes to arrive, in milliseconds. */
-const REVEAL_MS = 620;
-
-/** The cursor's reach, in screen pixels, converted to graph units per frame. */
-const FIELD_RADIUS_PX = 150;
-
-/**
- * The middle of the field, where nothing moves, as a fraction of the radius.
- * Everything inside it stays exactly where sigma thinks it is, so what you
- * are pointing at is always what you click.
- */
-const FIELD_HOLE = 0.34;
-
 /**
  * Nodes wear their state as a ring: the fill says which language, the ring
  * says whether KOG could read it. One channel each, both always on.
@@ -73,10 +60,8 @@ const NodeWithRing = createNodeBorderProgram({
  */
 const LABEL_ALL_NEIGHBOURS_UP_TO = 40;
 
-/** How far the blast wave travels, in hops, and how fast. */
-const WAVE_DEPTH = 5;
-const WAVE_STEP_MS = 130;
-const WAVE_TAIL_MS = 900;
+/** How long the camera takes to travel to a selection, in milliseconds. */
+const TRAVEL_MS = 320;
 
 function prefersReducedMotion(): boolean {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -86,7 +71,7 @@ export type CanvasState = {
   /** Ids that pass the current filters. Everything else is hidden. */
   visible: Set<string> | null;
   selected: string | null;
-  /** Anything the pointer is over, in the graph or in a side panel. */
+  /** Anything the pointer is deliberately on, in a side panel. */
   hovered: string | null;
   labelMode: LabelMode;
   groupByFolder: boolean;
@@ -99,7 +84,6 @@ type Props = CanvasState & {
   index: ProjectIndex;
   communities: Communities;
   onSelect: (id: string | null) => void;
-  onHover: (id: string | null) => void;
 };
 
 /**
@@ -136,33 +120,31 @@ function labelDrawer(theme: CanvasTheme, bold = false) {
 }
 
 /**
- * The hovered node gets a breathing ring on sigma's hover layer.
+ * Hovering a node reads its name. That is the whole of it.
  *
- * A node that grows on hover would be ambiguous: size already means degree
- * here, so growing it says something false. A ring adds emphasis without
- * touching the channel that already carries a number.
+ * An earlier version answered a hover the way it answers a click: dim the
+ * graph, light the neighbourhood, breathe a ring around the node. Dragging
+ * the pointer across a dense cluster then fired that on every node it crossed,
+ * and the graph strobed. Pointing at something is not the same act as asking
+ * about it — the second one is a click, and it still gets the full answer.
  */
-function hoverDrawer(theme: CanvasTheme, phase: () => number) {
-  const label = labelDrawer(theme, true);
-  return (
-    context: CanvasRenderingContext2D,
-    data: PartialButFor<
-      NodeDisplayData,
-      "x" | "y" | "size" | "label" | "color"
-    >,
-    settings: Settings,
-  ): void => {
-    const breath = phase();
-    context.save();
-    context.beginPath();
-    context.arc(data.x, data.y, data.size + 3 + breath * 3, 0, Math.PI * 2);
-    context.strokeStyle = theme.focus;
-    context.globalAlpha = 0.8 - breath * 0.45;
-    context.lineWidth = 1.5;
-    context.stroke();
-    context.restore();
-    label(context, data, settings);
-  };
+function hoverDrawer(theme: CanvasTheme) {
+  return labelDrawer(theme, true);
+}
+
+/** The smallest box holding every point, without spreading into `Math.max`. */
+function extent(points: { x: number; y: number }[]) {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const point of points) {
+    if (point.x < minX) minX = point.x;
+    if (point.x > maxX) maxX = point.x;
+    if (point.y < minY) minY = point.y;
+    if (point.y > maxY) maxY = point.y;
+  }
+  return { minX, minY, maxX, maxY };
 }
 
 export function GraphCanvas(props: Props) {
@@ -178,18 +160,10 @@ export function GraphCanvas(props: Props) {
     colourBy,
     theme,
     onSelect,
-    onHover,
   } = props;
 
   const container = useRef<HTMLDivElement>(null);
   const sigma = useRef<Sigma | null>(null);
-  const field = useRef<CursorField | null>(null);
-
-  // Animation state lives in refs: a frame loop must not re-render React 60
-  // times a second to move a highlight by two pixels.
-  const reveal = useRef(1);
-  const breath = useRef(0);
-  const wave = useRef(-1);
 
   // The layout is the expensive part, so it is tied to what actually changes
   // its shape: the project and whether folders are collapsed. Filters,
@@ -202,8 +176,44 @@ export function GraphCanvas(props: Props) {
     [project, index, communities, groupByFolder],
   );
 
+  /**
+   * Bring a set of nodes into view.
+   *
+   * Filtering used to leave the camera where it was, which on any filter whose
+   * matches sit outside the current frame produced an empty canvas — filter to
+   * SQL on a repository whose 56 `.sql` files import nothing, and all 56 are
+   * parked in a row below the graph, off screen. The reader's conclusion is
+   * that the files are not there.
+   */
+  const frame = useCallback((ids: string[], travel: boolean) => {
+    const renderer = sigma.current;
+    if (!renderer) return;
+    const points = ids
+      .map((id) => renderer.getNodeDisplayData(id))
+      .filter((point) => point !== undefined);
+    if (points.length === 0) return;
+
+    const { minX, minY, maxX, maxY } = extent(points);
+    const span = Math.max(maxX - minX, maxY - minY, 0.06);
+    const state = {
+      x: (minX + maxX) / 2,
+      y: (minY + maxY) / 2,
+      ratio: Math.min(Math.max(span * 1.35, 0.08), 1.2),
+    };
+
+    if (travel && !prefersReducedMotion()) {
+      renderer
+        .getCamera()
+        .animate(state, { duration: TRAVEL_MS, easing: "quadraticInOut" });
+    } else {
+      renderer.getCamera().setState({ ...state, angle: 0 });
+    }
+  }, []);
+
   /** The anchor for highlighting, and the two directions around it. */
   const focus = useMemo(() => {
+    // `hovered` only ever comes from a deliberate point in a side panel now;
+    // the canvas itself no longer reports what the pointer passes over.
     const anchor = hovered ?? selected;
     if (!anchor || groupByFolder) return null;
     const uses = new Set(index.dependencies.get(anchor) ?? []);
@@ -224,7 +234,7 @@ export function GraphCanvas(props: Props) {
     const canvas = canvasTheme(theme);
     const renderer = new Sigma(graph, container.current, {
       renderEdgeLabels: false,
-      defaultEdgeColor: canvas.edgeMuted,
+      defaultEdgeColor: edgeInk(graph.size, theme).color,
       // Arrows are registered but never the default: 3,000 arrowheads at low
       // zoom is noise. The reducer promotes an edge to an arrow only while it
       // is being read.
@@ -244,225 +254,37 @@ export function GraphCanvas(props: Props) {
       labelWeight: "500",
       labelGridCellSize: 72,
       defaultDrawNodeLabel: labelDrawer(canvas),
-      defaultDrawNodeHover: hoverDrawer(canvas, () => breath.current),
+      defaultDrawNodeHover: hoverDrawer(canvas),
       zIndex: true,
     });
     sigma.current = renderer;
-    field.current = new CursorField(graph);
-    // The layout's extent changes with the graph, so the camera is reset to
-    // frame it rather than left wherever the previous one sat.
+    // The layout's extent changes with the graph, so the camera is framed on
+    // what was actually drawn rather than left wherever the previous one sat.
     renderer.getCamera().setState({ x: 0.5, y: 0.5, ratio: 1.05, angle: 0 });
+    frame(graph.nodes(), false);
 
     renderer.on("clickNode", ({ node }) => onSelect(node));
     renderer.on("clickStage", () => onSelect(null));
-    renderer.on("enterNode", ({ node }) => onHover(node));
-    renderer.on("leaveNode", () => onHover(null));
 
     return () => {
       renderer.kill();
       sigma.current = null;
-      field.current = null;
     };
     // Deliberately not keyed on the theme: colours are decided in the
     // reducers, so a theme change is a repaint and never a rebuild.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [graph, onSelect, onHover]);
+  }, [graph, onSelect, frame]);
 
-  /**
-   * The graph parts under the pointer, and closes behind it.
-   *
-   * The loop only runs while something is actually moving: a cursor over the
-   * canvas, or nodes still springing back. It stops on its own the moment the
-   * graph is at rest, so an idle window costs nothing.
-   */
-  useEffect(() => {
-    const renderer = sigma.current;
-    if (!renderer || prefersReducedMotion()) return;
-
-    let cursor: { x: number; y: number } | null = null;
-    let raf = 0;
-    let running = false;
-
-    const tick = () => {
-      const active = field.current?.step(cursor, {
-        // Both are read from the camera, so the effect is the same size on
-        // screen whatever the zoom.
-        radius: FIELD_RADIUS_PX * renderer.getCamera().ratio * scale(),
-        strength: 1.6 * renderer.getCamera().ratio * scale(),
-        hole: FIELD_HOLE,
-      });
-      renderer.refresh({ skipIndexation: true });
-      if (cursor || active) raf = requestAnimationFrame(tick);
-      else running = false;
-    };
-
-    // One graph unit in screen pixels, so the field can be specified in
-    // pixels and behave identically at every zoom level.
-    const scale = () => {
-      const a = renderer.viewportToGraph({ x: 0, y: 0 });
-      const b = renderer.viewportToGraph({ x: 1, y: 0 });
-      return Math.abs(b.x - a.x) / Math.max(renderer.getCamera().ratio, 1e-6);
-    };
-
-    const start = () => {
-      if (running) return;
-      running = true;
-      raf = requestAnimationFrame(tick);
-    };
-
-    const mouse = renderer.getMouseCaptor();
-    const onMove = (event: { x: number; y: number }) => {
-      cursor = renderer.viewportToGraph(event);
-      start();
-    };
-    const onLeave = () => {
-      cursor = null;
-      start();
-    };
-
-    mouse.on("mousemovebody", onMove);
-    mouse.on("mouseleave", onLeave);
-
-    return () => {
-      mouse.off("mousemovebody", onMove);
-      mouse.off("mouseleave", onLeave);
-      cancelAnimationFrame(raf);
-      field.current?.reset();
-    };
-  }, [graph]);
-
-  // The graph arrives rather than appearing: nodes scale up over half a
-  // second, which turns a hard cut into a moment where the eye can follow the
-  // shape forming.
-  useEffect(() => {
-    if (prefersReducedMotion()) {
-      reveal.current = 1;
-      return;
-    }
-    reveal.current = 0;
-    const started = performance.now();
-    let raf = 0;
-    const step = () => {
-      const elapsed = performance.now() - started;
-      reveal.current = Math.min(
-        1,
-        1 - Math.pow(2, (-10 * elapsed) / REVEAL_MS),
-      );
-      sigma.current?.refresh({ skipIndexation: true });
-      if (elapsed < REVEAL_MS) raf = requestAnimationFrame(step);
-      else reveal.current = 1;
-    };
-    raf = requestAnimationFrame(step);
-    return () => cancelAnimationFrame(raf);
-  }, [graph]);
-
-  // A slow pulse on whatever is being read, and nothing at all otherwise: an
-  // idle canvas that never stops moving is exhausting to sit in front of.
-  useEffect(() => {
-    if (!focus || prefersReducedMotion()) {
-      breath.current = 0;
-      sigma.current?.refresh({ skipIndexation: true });
-      return;
-    }
-    const started = performance.now();
-    let raf = 0;
-    const step = () => {
-      breath.current =
-        (1 - Math.cos(((performance.now() - started) / 1500) * Math.PI * 2)) /
-        2;
-      sigma.current?.refresh({ skipIndexation: true });
-      raf = requestAnimationFrame(step);
-    };
-    raf = requestAnimationFrame(step);
-    return () => cancelAnimationFrame(raf);
-  }, [focus]);
-
-  /**
-   * How many hops each file is from the selection, following the arrows
-   * *into* it: the set that breaks if this file changes.
-   */
-  const blast = useMemo(() => {
-    if (!selected || groupByFolder) return null;
-    const depth = new Map<string, number>([[selected, 0]]);
-    let frontier = [selected];
-    for (let hop = 1; hop <= WAVE_DEPTH && frontier.length > 0; hop++) {
-      const next: string[] = [];
-      for (const node of frontier) {
-        for (const dependent of index.dependents.get(node) ?? []) {
-          if (depth.has(dependent)) continue;
-          depth.set(dependent, hop);
-          next.push(dependent);
-        }
-      }
-      frontier = next;
-    }
-    return depth;
-  }, [selected, index, groupByFolder]);
-
-  /**
-   * The wave itself: a ripple that leaves the selected file and runs
-   * outwards through everything that depends on it, one hop at a time.
-   *
-   * This is the product's own question drawn as motion — *what breaks if I
-   * change this?* — and it answers it in the order the breakage would
-   * actually propagate. It runs once per selection and then stops.
-   */
-  useEffect(() => {
-    if (!blast || prefersReducedMotion()) {
-      wave.current = -1;
-      return;
-    }
-    const started = performance.now();
-    const span = WAVE_DEPTH * WAVE_STEP_MS + WAVE_TAIL_MS;
-    let raf = 0;
-    const step = () => {
-      const elapsed = performance.now() - started;
-      wave.current = elapsed;
-      sigma.current?.refresh({ skipIndexation: true });
-      if (elapsed < span) raf = requestAnimationFrame(step);
-      else wave.current = -1;
-    };
-    raf = requestAnimationFrame(step);
-    return () => cancelAnimationFrame(raf);
-  }, [blast]);
-
-  // Filtering, selection, hover and the wave are all one repaint: sigma asks
-  // these reducers what each node and edge looks like right now.
+  // Filtering, selection and hover are all one repaint: sigma asks these
+  // reducers what each node and edge looks like right now.
   useEffect(() => {
     const renderer = sigma.current;
     if (!renderer) return;
     const canvas = canvasTheme(theme);
-
-    /** How brightly the wave is passing through a node right now. */
-    const crest = (node: string): number => {
-      if (!blast || wave.current < 0) return 0;
-      const hop = blast.get(node);
-      if (hop === undefined || hop === 0) return 0;
-      const distance = wave.current - hop * WAVE_STEP_MS;
-      if (distance < 0) return 0;
-      // A crest that rises fast and falls away slowly, so the wave reads as
-      // travelling rather than as a row of lights switching on.
-      return Math.max(0, Math.exp(-distance / 320) - 0.04);
-    };
-
-    /** Blend towards the wave colour, in place of a second palette. */
-    const lit = (hex: string, amount: number): string => {
-      if (amount <= 0) return hex;
-      const from = Number.parseInt(hex.slice(1), 16);
-      const to = Number.parseInt(canvas.pulse.slice(1), 16);
-      const mix = (shift: number) => {
-        const a = (from >> shift) & 0xff;
-        const b = (to >> shift) & 0xff;
-        return Math.round(a + (b - a) * amount)
-          .toString(16)
-          .padStart(2, "0");
-      };
-      return `#${mix(16)}${mix(8)}${mix(0)}`;
-    };
+    const ink = edgeInk(graph.size, theme);
 
     renderer.setSetting("nodeReducer", (node, data) => {
       if (visible && !visible.has(node)) return { ...data, hidden: true };
-      const size = data.size * reveal.current;
       // Colour is computed here rather than stored on the node, so the
       // theme can never be one repaint behind: there is no cached attribute
       // to go stale.
@@ -475,7 +297,6 @@ export function GraphCanvas(props: Props) {
               theme,
               shadeKey(node),
             );
-      const glow = crest(node);
 
       if (node === selected) {
         // The fill still says which language: a selection that repainted the
@@ -484,7 +305,7 @@ export function GraphCanvas(props: Props) {
           ...data,
           color: fill,
           borderColor: canvas.focus,
-          size: size * (1.4 + breath.current * 0.1),
+          size: data.size * 1.4,
           zIndex: 4,
           forceLabel: true,
         };
@@ -494,40 +315,28 @@ export function GraphCanvas(props: Props) {
           return {
             ...data,
             color: fill,
-            size: size * 1.3,
+            size: data.size * 1.3,
             zIndex: 3,
             forceLabel: true,
           };
         }
         if (focus.uses.has(node) || focus.usedBy.has(node)) {
-          return {
-            ...data,
-            color: lit(fill, glow),
-            size,
-            zIndex: 2,
-            forceLabel: focus.nameThem,
-          };
+          return { ...data, color: fill, zIndex: 2, forceLabel: focus.nameThem };
         }
         // Dimmed and shrunk rather than hidden: the shape of the whole is
         // the context that makes a neighbourhood mean anything, but it has
-        // to stop competing while you read one.
+        // to stop competing while you read one. `dim` sits close to the
+        // background on purpose — the mid grey it used to use turned the rest
+        // of a 900-node graph into one solid slab.
         return {
           ...data,
-          color: canvas.edge,
-          size: size * 0.55,
+          color: canvas.dim,
+          size: data.size * 0.55,
           label: "",
           zIndex: 0,
         };
       }
-      if (glow > 0) {
-        return {
-          ...data,
-          color: lit(fill, glow),
-          size: size * (1 + glow * 0.5),
-          zIndex: 2,
-        };
-      }
-      return { ...data, color: fill, size };
+      return { ...data, color: fill };
     });
 
     renderer.setSetting("edgeReducer", (edge, data) => {
@@ -536,7 +345,7 @@ export function GraphCanvas(props: Props) {
         return { ...data, hidden: true };
       }
       if (focus) {
-        // What the anchor uses: blue, the colour of the thing you are
+        // What the anchor uses: the focus colour, the thing you are
         // following. What uses the anchor: the plain foreground. The two
         // directions never have to be guessed from arrowheads alone.
         if (source === focus.anchor && focus.uses.has(target)) {
@@ -544,7 +353,7 @@ export function GraphCanvas(props: Props) {
             ...data,
             type: "arrow",
             color: canvas.focus,
-            size: 1.4 + breath.current * 0.5,
+            size: 1.4,
             zIndex: 2,
           };
         }
@@ -553,23 +362,20 @@ export function GraphCanvas(props: Props) {
             ...data,
             type: "arrow",
             color: canvas.label,
-            size: 1 + breath.current * 0.4,
+            size: 1,
             zIndex: 2,
           };
         }
-        return { ...data, color: canvas.edge, size: 0.18 };
+        return { ...data, color: ink.color, size: ink.size * 0.5 };
       }
-      return { ...data, color: canvas.edge, size: 0.45 };
+      return { ...data, color: ink.color, size: ink.size };
     });
 
     renderer.setSetting("defaultDrawNodeLabel", labelDrawer(canvas));
-    renderer.setSetting(
-      "defaultDrawNodeHover",
-      hoverDrawer(canvas, () => breath.current),
-    );
-    renderer.setSetting("defaultEdgeColor", canvas.edgeMuted);
+    renderer.setSetting("defaultDrawNodeHover", hoverDrawer(canvas));
+    renderer.setSetting("defaultEdgeColor", ink.color);
     renderer.refresh();
-  }, [graph, index, visible, selected, focus, blast, colourBy, theme]);
+  }, [graph, index, visible, selected, focus, colourBy, theme]);
 
   useEffect(() => {
     const renderer = sigma.current;
@@ -591,37 +397,23 @@ export function GraphCanvas(props: Props) {
   // zooming to a fixed ratio puts a hub's 35 dependents off-screen, which is
   // exactly the answer the reader asked for.
   useEffect(() => {
-    const renderer = sigma.current;
-    if (!renderer || !selected || !graph.hasNode(selected)) return;
-
+    if (!selected || !graph.hasNode(selected)) return;
     const ids = [
       selected,
       ...(index.dependents.get(selected) ?? []),
       ...(index.dependencies.get(selected) ?? []),
-    ];
-    const points = ids
-      .filter((id) => graph.hasNode(id) && (!visible || visible.has(id)))
-      .map((id) => renderer.getNodeDisplayData(id))
-      .filter((point) => point !== undefined);
-    if (points.length === 0) return;
+    ].filter((id) => graph.hasNode(id) && (!visible || visible.has(id)));
+    frame(ids, true);
+  }, [selected, graph, index, visible, frame]);
 
-    const xs = points.map((point) => point.x);
-    const ys = points.map((point) => point.y);
-    const span = Math.max(
-      Math.max(...xs) - Math.min(...xs),
-      Math.max(...ys) - Math.min(...ys),
-      0.06,
-    );
-
-    renderer.getCamera().animate(
-      {
-        x: (Math.min(...xs) + Math.max(...xs)) / 2,
-        y: (Math.min(...ys) + Math.max(...ys)) / 2,
-        ratio: Math.min(Math.max(span * 1.35, 0.08), 1.2),
-      },
-      { duration: 380, easing: "quadraticInOut" },
-    );
-  }, [selected, graph, index, visible]);
+  // A filter that leaves its matches off screen reads as a filter that
+  // matched nothing. Nothing to do while a selection is on screen: the
+  // effect above is already pointing the camera, and two of them competing
+  // would fight for it.
+  useEffect(() => {
+    if (selected) return;
+    frame(visible ? [...visible] : graph.nodes(), true);
+  }, [visible, selected, graph, frame]);
 
   return <div ref={container} className="absolute inset-0" />;
 }

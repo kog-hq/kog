@@ -27,11 +27,51 @@ Named, then: after this change, `acme-saas` may be less readable than it is
 today. The tuning session in §9 is where that gets settled, and the acceptance
 bar in §11 is what it has to clear.
 
+**That risk was tested before this document was finished, and it did not
+materialise — see §0.**
+
 One thing is kept: **the Louvain seed**. Obsidian has no communities; this
 project does. Starting from clusters that already hold together gives repulsion
 clean work to do — pushing groups apart — instead of impossible work: untangling
 them. It is the one place where KOG can beat Obsidian on Obsidian's own ground,
 and the code already exists.
+
+## 0. What the spike measured
+
+Before writing the module, a throwaway (`app/src/graph/spike-d3.ts`, behind
+`?layout=d3` in a dev build) laid `acme-saas` out with d3-force and nothing
+else changed, so the two layouts could be photographed on the same scan. The
+solver ran headlessly to freeze: the question was the *map*, not the animation.
+
+**d3 came out better than ForceAtlas2, not worse.** FA2 produces one mass with
+colour regions — `apps/backend` and `apps/frontend` occupy the same space and
+are told apart only by hue. d3 separates them into two lobes with the satellite
+communities (`backend/scripts`, `backend/src`, `shared-types`) as distinct
+islands. The hairball this document was written to fear is what FA2 was already
+producing.
+
+It took tuning to get there. At the dials this document first proposed, clusters
+came out as dense slabs and the unconnected files sprawled across more area than
+the graph itself. Three findings:
+
+| Dial | First guess | Measured | Why |
+| --- | --- | --- | --- |
+| `perDegree` | 8 | **25** | degree-weighted repulsion is what loosens clusters, and it does so without scattering isolated files, whose degree is 0 |
+| `centre` | 0.02 | **0.25** | the isolate halo needs it, and the clusters are not crushed by it |
+| `repel` | 200 | **150** | `perDegree` carries the load now |
+
+The middle row deserves a warning, because it contradicts a lesson recorded in
+`NEXT-AGENT.md`: *"do not raise gravity thinking it will tighten things."* That
+was true of FA2, whose repulsion falls off as 1/d and therefore fights a central
+pull all the way out. d3's `manyBody` falls off as 1/d², so at range there is
+almost nothing to fight, and a centre force **ten times FA2's gravity** is what
+stops unconnected files from drifting to infinity. The old lesson does not
+transfer. Anyone who "fixes" `centre` back down to 0.02 will get the sprawl back.
+
+Measured cost: **864 nodes, 3,121 edges, 300 ticks in ~410 ms** — 1.37 ms per
+tick for the solver alone. A 60 fps frame is 16.7 ms, so the solver is 8% of the
+budget on this graph. The unknown is the sigma refresh sitting on top of it,
+which is what §7 is about.
 
 ## 1. The force model
 
@@ -40,7 +80,7 @@ Obsidian exposes four dials. Their d3 equivalents:
 | Obsidian | d3 | Role |
 | --- | --- | --- |
 | Center force | `forceX(0)` + `forceY(0)`, weak | holds the whole together, stops drift |
-| Repel force | `forceManyBody()`, negative, Barnes-Hut | **the core** — this is what separates everything |
+| Repel force | `forceManyBody()`, negative, Barnes-Hut, **weighted by degree** | **the core** — this is what separates everything |
 | Link force | `forceLink().strength()` | spring stiffness |
 | Link distance | `forceLink().distance()` | spring rest length |
 
@@ -53,9 +93,18 @@ translating the whole system, with no adjustable strength, whereas Obsidian's
 "center force" slider is a dosable attraction. `forceCenter` would also fight
 the camera rather than the layout.
 
-`forceCollide` is not in the model by default. Global repulsion already keeps
-nodes apart, and collide costs a second quadtree per tick. It goes in only if
-the tuning session shows overlap that repulsion alone does not fix.
+Repulsion is `-(repel + perDegree × degree)`, not a constant. FA2 repels by
+`(deg(a)+1)(deg(b)+1)`, so hubs claim space and clusters breathe; d3's
+`manyBody` is uniform unless told otherwise, and uniform is what produced the
+dense slabs in §0. This term is not a refinement, it is the difference between
+readable and not.
+
+`forceCollide` stays in the model. It was going to be optional until the node
+sizes were looked at: `sizeFor` is `2.2 + √degree × 1.55`, so a degree-50 node
+draws at 13 px against 2.2 for an unconnected one. Without anti-overlap, small
+nodes vanish *inside* large ones — and "nothing disappears silently" is rule 2
+of this project, which does not stop applying because the disappearance is
+geometric.
 
 ## 2. The load sequence
 
@@ -139,6 +188,12 @@ nothing disappears silently, and a file that imports nothing and is imported by
 nothing is a finding, not noise. If the halo proves unreadable at scale, the
 answer is revisited with a measurement, not with a checkbox.
 
+Measured (§0): at `centre = 0.02` they sprawl across more area than the graph
+itself, which is the failure `parkIsolated` was written for. At `centre = 0.25`
+they pack into a compact cloud offset from the connected graph and cost almost
+nothing. The halo is viable, but only because of that one dial — which is why
+§0 spends a paragraph telling the next reader not to turn it back down.
+
 ## 6. Framing and edge culling, under motion
 
 - **On mount**: no `frame()` on the seed — it would fit the compact cluster
@@ -159,8 +214,9 @@ answer is revisited with a measurement, not with a checkbox.
 
 ## 7. Scale
 
-`acme-saas` (864 nodes) will hold. The doubt is `documenso`: **2,800 nodes,
-~4,000 edges, 60 fps for two seconds of bloom.** Per tick that is a Barnes-Hut
+`acme-saas` (864 nodes) holds with room to spare — 1.37 ms per tick, 8% of a
+frame, measured in §0. The doubt is `documenso`: **2,800 nodes, ~4,000 edges,
+60 fps for two seconds of bloom.** Per tick that is a Barnes-Hut
 pass, a link pass, the batched write-back, and a sigma refresh running the node
 reducer 2,800 times and the edge reducer 4,000 times.
 
@@ -228,9 +284,30 @@ a command and its output.
 
 ## 12. Open risks
 
-1. **Layout regression.** The one that matters. Mitigated only by measuring
-   against today's screenshots, and by keeping the Louvain seed.
-2. **The orphan halo** may cost more camera area than `parkIsolated` saved.
+1. ~~**Layout regression.**~~ Closed by §0: d3 reads better than FA2 on
+   `acme-saas`. Still to confirm on `documenso`.
+2. ~~**The orphan halo** may cost more camera area than `parkIsolated` saved.~~
+   Closed by §0, conditional on `centre = 0.25`.
 3. **Frame rate on `documenso`** may need the worker that §7 holds in reserve.
+   The solver is cheap; the sigma refresh is not measured yet.
 4. **Repeated drags drift the layout** — accepted, by design, and the reason
    there is no persisted position and no claim that the picture is canonical.
+5. **Louvain is not deterministic** — see §13. It is not caused by this work,
+   but this work makes it much more visible.
+
+## 13. Found on the way — Louvain reshuffles on every load
+
+`communities.ts` calls `louvain(graph, { resolution: 1 })` with no `rng`, so
+the library falls back to `Math.random`. Two loads of the *same* scan produce
+different partitions: across four screenshots taken minutes apart,
+`apps/frontend` was measured at 192, 192, 255 and 186 files, and
+`apps/frontend/src` at 145, 145, 86 and 109.
+
+That is already wrong today — the community list in the rail and the colour of
+every node change between reloads of a scan whose numbers are supposed to be
+auditable. **This work makes it worse**, because the Louvain partition seeds the
+layout: the same repository would open to a visibly different map every time.
+
+It is out of scope here and belongs in its own commit, but it blocks §11 —
+"screenshots side by side" cannot compare two layouts if the partition moved
+underneath them. The fix is one argument: pass a seeded PRNG as `rng`.

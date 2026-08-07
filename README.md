@@ -96,6 +96,19 @@ kog scan              # stats to stdout, writes nothing
 kog scan -o g.json    # write the graph as JSON
 ```
 
+Hand it to a graph tool instead, each behind its own flag and none of them a default —
+a scan that wrote four files because you ran it is a scan you stop running:
+
+```bash
+kog scan --graphml g.graphml   # Gephi, yEd, Cytoscape
+kog scan --cypher g.cypher     # cat g.cypher | cypher-shell -u neo4j
+```
+
+There is no SVG export, deliberately: an SVG needs a layout, the only layout KOG has runs
+in the browser, and a worse one written in Rust would produce a picture that looks
+authoritative and is arbitrary. Both formats above hand the graph to tools whose layouts
+are better than anything that would be written here.
+
 The server binds to `127.0.0.1` on an OS-assigned port and prints the URL before opening
 anything, so `kog` over SSH still tells you where to look.
 

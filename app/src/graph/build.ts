@@ -3,6 +3,7 @@ import forceAtlas2 from "graphology-layout-forceatlas2";
 import type { KogProject, NodeKind, ProjectIndex } from "@/lib/kog";
 import { dirName } from "@/lib/kog";
 import type { Communities } from "./communities";
+import { spikeOn } from "./spike-d3";
 
 /**
  * Turning a scan into something sigma can draw.
@@ -223,6 +224,11 @@ export function buildGraph(
   });
 
   seed(graph, communities);
+
+  // THROWAWAY SPIKE — delete with `spike-d3.ts`. Leaves the graph on its seed
+  // and hands the layout to the live solver, which the canvas starts. Nothing
+  // long-lived may begin here: this function is a `useMemo` factory.
+  if (spikeOn) return graph;
 
   const order = graph.order;
   forceAtlas2.assign(graph, {

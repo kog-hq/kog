@@ -1,6 +1,5 @@
 import Sigma from "sigma";
-import { EdgeCurvedArrowProgram } from "@sigma/edge-curve";
-import { EdgeArrowProgram } from "sigma/rendering";
+import { EdgeArrowProgram, EdgeRectangleProgram } from "sigma/rendering";
 import type { Settings } from "sigma/settings";
 import type { NodeDisplayData, PartialButFor } from "sigma/types";
 import { useCallback, useEffect, useMemo, useRef } from "react";
@@ -18,6 +17,15 @@ import {
   type Theme,
 } from "@/lib/palette";
 import type { KogProject, ProjectIndex } from "@/lib/kog";
+// THROWAWAY SPIKE — delete with `spike-d3.ts`.
+import {
+  onSpikeFreeze,
+  spikeGrab,
+  spikeMove,
+  spikeOn,
+  spikeRelease,
+  startSpike,
+} from "./spike-d3";
 
 export type LabelMode = "none" | "hubs" | "more" | "all";
 
@@ -329,15 +337,25 @@ export function GraphCanvas(props: Props) {
       // Arrows are registered but never the default: 3,000 arrowheads at low
       // zoom is noise. The reducer promotes an edge to an arrow only while it
       // is being read.
-      // Curves, not straight lines. Two files linked across a cluster draw
-      // a chord that leaves the middle alone, where a straight line cuts
-      // through everything between them — which is what made the graph look
-      // like a scribble rather than a map.
-      defaultEdgeType: "curve",
+      //
+      // Straight lines, not curves. Curves were the right call for a frozen
+      // layout — a chord across a cluster leaves the middle alone where a
+      // straight line cuts through it. They stop being right the moment
+      // positions move: the control point of a curved edge scales with the
+      // edge's length, so a node pulled away from its cluster turns its two
+      // hundred edges into arcs that sweep the whole screen. Obsidian draws
+      // straight lines, and a straight line between two moving points is the
+      // only edge whose shape says nothing beyond where its ends are.
+      defaultEdgeType: "line",
       edgeProgramClasses: {
-        curve: EdgeCurvedArrowProgram,
+        line: EdgeRectangleProgram,
         arrow: EdgeArrowProgram,
       },
+      // The camera can no longer be flown into empty space. Zooming past
+      // these is never useful: below `min` a single node fills the frame,
+      // above `max` the graph is a smudge.
+      minCameraRatio: 0.05,
+      maxCameraRatio: 4,
       defaultNodeType: "bordered",
       nodeProgramClasses: { bordered: NodeWithRing },
       labelFont: '"JetBrains Mono Variable", ui-monospace, monospace',
@@ -351,11 +369,26 @@ export function GraphCanvas(props: Props) {
     sigma.current = renderer;
     // The layout's extent changes with the graph, so the camera is framed on
     // what was actually drawn rather than left wherever the previous one sat.
-    renderer.getCamera().setState({ x: 0.5, y: 0.5, ratio: 1.05, angle: 0 });
-    frame(graph.nodes(), false);
+    // THROWAWAY SPIKE — a wider ratio, because framing the seed would fit the
+    // compact cluster moments before the graph leaves it. The camera holds
+    // while it blooms; one frame at freeze fits what was actually drawn.
+    renderer
+      .getCamera()
+      .setState({ x: 0.5, y: 0.5, ratio: spikeOn ? 3.2 : 1.05, angle: 0 });
+    if (!spikeOn) frame(graph.nodes(), false);
 
     renderer.on("clickNode", ({ node }) => onSelect(node));
     renderer.on("clickStage", () => onSelect(null));
+
+    // Sigma zooms on double click, on a node and on the background alike. It
+    // fights every other way of moving around and lands you somewhere you did
+    // not ask to be, so it is switched off rather than tuned.
+    renderer.on("doubleClickNode", ({ preventSigmaDefault }) =>
+      preventSigmaDefault(),
+    );
+    renderer.on("doubleClickStage", ({ preventSigmaDefault }) =>
+      preventSigmaDefault(),
+    );
 
     // Hover, after the pointer has stopped. See `HOVER_DELAY_MS`.
     let resting: number | undefined;
@@ -379,6 +412,7 @@ export function GraphCanvas(props: Props) {
       dragged = node;
       if (container.current) container.current.style.cursor = "grabbing";
       renderer.getCamera().disable();
+      spikeGrab(node); // THROWAWAY SPIKE
     });
     const mouse = renderer.getMouseCaptor();
     const onMove = (event: {
@@ -389,8 +423,14 @@ export function GraphCanvas(props: Props) {
     }) => {
       if (!dragged) return;
       const at = renderer.viewportToGraph(event);
-      graph.setNodeAttribute(dragged, "x", at.x);
-      graph.setNodeAttribute(dragged, "y", at.y);
+      // THROWAWAY SPIKE — with a solver running, the node is moved by pinning
+      // it, not by writing its position: writing would fight the next tick.
+      if (spikeOn) {
+        spikeMove(at.x, at.y);
+      } else {
+        graph.setNodeAttribute(dragged, "x", at.x);
+        graph.setNodeAttribute(dragged, "y", at.y);
+      }
       // Sigma would otherwise also pan; the browser would otherwise select
       // text across the page while the button is held.
       event.preventSigmaDefault();
@@ -400,6 +440,7 @@ export function GraphCanvas(props: Props) {
     const onRelease = () => {
       if (!dragged) return;
       dragged = null;
+      spikeRelease(); // THROWAWAY SPIKE
       if (container.current) container.current.style.cursor = "pointer";
       renderer.getCamera().enable();
     };
@@ -414,8 +455,24 @@ export function GraphCanvas(props: Props) {
     // on every frame of a drag would cost far more than it buys.
     let settle: number | undefined;
     const onCamera = () => {
+      // Keep the graph reachable. Sigma's camera lives in a space where the
+      // laid-out graph occupies roughly 0..1 on each axis, so clamping the
+      // centre to a fifth beyond that box means a pan can never leave you
+      // staring at blank canvas with no way back. Written only when it is
+      // actually out of bounds — `setState` re-fires this handler.
+      const camera = renderer.getCamera();
+      const state = camera.getState();
+      const x = Math.min(1.2, Math.max(-0.2, state.x));
+      const y = Math.min(1.2, Math.max(-0.2, state.y));
+      if (x !== state.x || y !== state.y) {
+        camera.setState({ ...state, x, y });
+        return;
+      }
       window.clearTimeout(settle);
       settle = window.setTimeout(() => {
+        // Same guard as the fade loop: a deferred callback in this file must
+        // re-check that its renderer is still the live one.
+        if (sigma.current !== renderer) return;
         onScreen.current = viewportOf(renderer);
         renderer.refresh({ skipIndexation: true });
       }, 90);
@@ -423,7 +480,27 @@ export function GraphCanvas(props: Props) {
     renderer.getCamera().on("updated", onCamera);
     onScreen.current = viewportOf(renderer);
 
+    // THROWAWAY SPIKE — a full refresh at freeze, not a skipIndexation one:
+    // the spatial index and the label grid are both a second out of date after
+    // a bloom, so hover would point at where nodes used to be.
+    // THROWAWAY SPIKE — started here, on the graph this renderer is drawing,
+    // and stopped with it.
+    const stopSpike = startSpike(graph);
+
+    const unsubscribe = onSpikeFreeze(() => {
+      // Switching project between the last tick and `end` leaves this handler
+      // holding a renderer React has already killed, and refreshing one throws
+      // on its own node programs. The freeze callback has to be scoped to the
+      // renderer that is still on screen.
+      if (sigma.current !== renderer) return;
+      renderer.refresh();
+      onScreen.current = viewportOf(renderer);
+      frame(graph.nodes(), true);
+    });
+
     return () => {
+      stopSpike();
+      unsubscribe();
       window.clearTimeout(settle);
       window.clearTimeout(resting);
       mouse.off("mousemovebody", onMove);
@@ -457,6 +534,11 @@ export function GraphCanvas(props: Props) {
     const started = performance.now();
     let raf = 0;
     const step = () => {
+      // This effect is keyed on `focus` alone, so a graph change swaps the
+      // renderer underneath a loop that is still in flight. Refreshing a
+      // killed renderer throws on its own node programs. Latent until the
+      // layout became live — now the loop is nearly always running.
+      if (sigma.current !== renderer) return;
       const progress = Math.min(1, (performance.now() - started) / FADE_MS);
       // Ease out: fast enough to feel like a response, slow enough not to snap.
       fade.current = from + (target - from) * progress * (2 - progress);
@@ -475,14 +557,17 @@ export function GraphCanvas(props: Props) {
     const canvas = canvasTheme(theme);
     const ink = edgeInk(graph.size, theme);
 
-    // Keyed by fill and step, and rebuilt whenever the palette can change.
+    // Keyed by target, fill and step, and rebuilt whenever the palette can
+    // change. Nodes fade towards `dim`, edges towards `edgeMuted` — an edge
+    // has to go further to stop competing, because there are thousands of
+    // them crossing each other.
     const dimmed = new Map<string, string>();
-    const towardsBackground = (fill: string, away: number): string => {
+    const towards = (target: string, fill: string, away: number): string => {
       const step = Math.round(away * FADE_STEPS);
-      const key = `${fill}|${step}`;
+      const key = `${target}|${fill}|${step}`;
       const cached = dimmed.get(key);
       if (cached !== undefined) return cached;
-      const blended = mix(canvas.dim, fill, step / FADE_STEPS);
+      const blended = mix(target, fill, step / FADE_STEPS);
       dimmed.set(key, blended);
       return blended;
     };
@@ -538,7 +623,7 @@ export function GraphCanvas(props: Props) {
         const away = fade.current;
         return {
           ...data,
-          color: towardsBackground(fill, away),
+          color: towards(canvas.dim, fill, away),
           size: data.size * (1 - 0.45 * away),
           label: away > 0.5 ? "" : data.label,
           zIndex: 0,
@@ -587,7 +672,17 @@ export function GraphCanvas(props: Props) {
             zIndex: 2,
           };
         }
-        return { ...data, color: ink.color, size: ink.size * 0.5 };
+        // Everything the anchor does not touch recedes almost to nothing,
+        // blended by `fade` so it is a transition and not a cut. Thinning
+        // alone was not enough: a thin line crossing a thousand others is
+        // still a thousand lines, and the neighbourhood has to be the only
+        // thing left with any weight.
+        const away = fade.current;
+        return {
+          ...data,
+          color: towards(canvas.edgeMuted, ink.color, away),
+          size: ink.size * (1 - 0.45 * away),
+        };
       }
       return { ...data, color: ink.color, size: ink.size };
     });
@@ -612,20 +707,19 @@ export function GraphCanvas(props: Props) {
     renderer.refresh();
   }, [labelMode]);
 
-  // Selecting from the search dialog, the inspector or the gap list has to
-  // bring the node into view, or the selection is invisible and reads as a
-  // no-op. The camera frames the whole neighbourhood rather than the node:
-  // zooming to a fixed ratio puts a hub's 35 dependents off-screen, which is
-  // exactly the answer the reader asked for.
-  useEffect(() => {
-    if (!selected || !graph.hasNode(selected)) return;
-    const ids = [
-      selected,
-      ...(index.dependents.get(selected) ?? []),
-      ...(index.dependencies.get(selected) ?? []),
-    ].filter((id) => graph.hasNode(id) && (!visible || visible.has(id)));
-    frame(ids, true);
-  }, [selected, graph, index, visible, frame]);
+  // Clicking a node no longer moves the camera.
+  //
+  // It used to frame the whole neighbourhood, on the reasoning that an
+  // off-screen selection reads as a no-op. On a live layout that reasoning
+  // inverts: the camera lurches on every click, and since the answer to the
+  // click is a change of *colour* — the neighbourhood lights, the rest fades —
+  // it was already visible wherever you were. Moving the ground under the
+  // reader to show them something they could already see is the worst trade
+  // in the file.
+  //
+  // Selecting from the search dialog is the one case that genuinely needs the
+  // camera, and it is left to be solved on its own terms rather than by
+  // moving the view on every click.
 
   // A filter that leaves its matches off screen reads as a filter that
   // matched nothing. Nothing to do while a selection is on screen: the

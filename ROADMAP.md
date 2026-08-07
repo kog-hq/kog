@@ -132,6 +132,21 @@ earlier, which is what most clients still speak.
 
 ---
 
+## v0.4 — exports — partly shipped
+
+`--graphml` and `--cypher` on `kog scan`, each behind its own flag and never a default.
+GraphML opens in Gephi, yEd and Cytoscape; the Cypher loads into Neo4j with `cypher-shell`
+and uses `MERGE` throughout, so re-running a scan updates one graph rather than building a
+second beside it. Ids are project-qualified, so a workspace of nine projects does not merge
+nine `src/index.ts` into one node.
+
+**SVG is not shipped, and is not planned in this form.** It needs a layout; the only layout
+KOG has runs in the browser, and writing a worse one in Rust would produce a picture that
+looks authoritative and is arbitrary — which is the failure this project is against. Both
+formats above hand the graph to tools that lay it out far better.
+
+---
+
 ## v0.4 — packaging
 
 `release-plz` and `cargo-dist`: versioned releases, generated changelog, prebuilt binaries

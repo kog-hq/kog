@@ -32,6 +32,12 @@ enum Command {
         /// Write the graph as JSON to this path.
         #[arg(short, long)]
         output: Option<PathBuf>,
+        /// Also write GraphML here, for Gephi, yEd or Cytoscape.
+        #[arg(long, value_name = "FILE")]
+        graphml: Option<PathBuf>,
+        /// Also write Cypher here, to load into Neo4j with `cypher-shell`.
+        #[arg(long, value_name = "FILE")]
+        cypher: Option<PathBuf>,
     },
     /// Scan a project and serve the graph in a browser.
     ///
@@ -85,7 +91,12 @@ fn main() -> Result<()> {
         root: PathBuf::from("."),
     });
     match command {
-        Command::Scan { root, output } => scan(root, output),
+        Command::Scan {
+            root,
+            output,
+            graphml,
+            cypher,
+        } => scan(root, output, graphml, cypher),
         Command::View { root } => view(root),
         Command::Query {
             question,
@@ -249,17 +260,33 @@ fn print_workspace(workspace: &Workspace) {
     }
 }
 
-fn scan(root: PathBuf, output: Option<PathBuf>) -> Result<()> {
+/// Scan, print the numbers, and write whatever files were asked for.
+///
+/// Every format is behind its own flag and none is a default: a scan that
+/// wrote four files because you ran it is a scan you stop running.
+fn scan(
+    root: PathBuf,
+    output: Option<PathBuf>,
+    graphml: Option<PathBuf>,
+    cypher: Option<PathBuf>,
+) -> Result<()> {
     let root = canonicalize_root(root)?;
     let workspace = scan_workspace(&root);
     print_workspace(&workspace);
 
-    if let Some(output) = output {
-        let json = serde_json::to_string_pretty(&workspace)?;
-        std::fs::write(&output, json)
-            .with_context(|| format!("cannot write {}", output.display()))?;
-        println!("written                {}", output.display());
-    }
+    let write = |path: Option<PathBuf>, body: &dyn Fn() -> String| -> Result<()> {
+        let Some(path) = path else { return Ok(()) };
+        std::fs::write(&path, body())
+            .with_context(|| format!("cannot write {}", path.display()))?;
+        println!("written                {}", path.display());
+        Ok(())
+    };
+
+    write(output, &|| {
+        serde_json::to_string_pretty(&workspace).unwrap_or_default()
+    })?;
+    write(graphml, &|| kog_graph::graphml(&workspace))?;
+    write(cypher, &|| kog_graph::cypher(&workspace))?;
 
     Ok(())
 }
@@ -374,7 +401,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let missing = dir.path().join("does-not-exist");
 
-        let err = scan(missing.clone(), None).unwrap_err();
+        let err = scan(missing.clone(), None, None, None).unwrap_err();
 
         let message = err.to_string();
         assert!(
@@ -395,7 +422,7 @@ mod tests {
         let file = dir.path().join("not-a-directory.txt");
         fs::write(&file, "hello").unwrap();
 
-        let err = scan(file.clone(), None).unwrap_err();
+        let err = scan(file.clone(), None, None, None).unwrap_err();
 
         let message = err.to_string();
         assert!(
@@ -417,7 +444,7 @@ mod tests {
         fs::write(root.join("src/b.ts"), "export const b = 1;").unwrap();
         let output = dir.path().join("graph.json");
 
-        scan(root, Some(output.clone())).unwrap();
+        scan(root, Some(output.clone()), None, None).unwrap();
 
         assert!(output.exists(), "scan -o should have written {output:?}");
         let contents = fs::read_to_string(&output).unwrap();
@@ -451,7 +478,7 @@ mod tests {
         }
         let output = dir.path().join("graph.json");
 
-        scan(root, Some(output.clone())).unwrap();
+        scan(root, Some(output.clone()), None, None).unwrap();
 
         let json: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(&output).unwrap()).unwrap();
@@ -496,7 +523,7 @@ mod tests {
         fs::write(root.join("src/bad.ts"), [0xff, 0xfe, 0xfd]).unwrap();
         let output = dir.path().join("graph.json");
 
-        scan(root, Some(output.clone())).expect("an unreadable file must not be fatal");
+        scan(root, Some(output.clone()), None, None).expect("an unreadable file must not be fatal");
 
         let contents = fs::read_to_string(&output).unwrap();
         let json: serde_json::Value = serde_json::from_str(&contents).unwrap();
@@ -517,7 +544,7 @@ mod tests {
         fs::create_dir_all(root.join("src")).unwrap();
         fs::write(root.join("src/a.ts"), "export const a = 1;").unwrap();
 
-        scan(root.clone(), None).unwrap();
+        scan(root.clone(), None, None, None).unwrap();
 
         assert!(
             fs::read_dir(&root)
@@ -539,6 +566,8 @@ mod tests {
             Some(Command::Scan {
                 root: PathBuf::from("."),
                 output: None,
+                graphml: None,
+                cypher: None,
             })
         );
     }
@@ -573,6 +602,8 @@ mod tests {
             Some(Command::Scan {
                 root: PathBuf::from("some/dir"),
                 output: Some(PathBuf::from("g.json")),
+                graphml: None,
+                cypher: None,
             })
         );
     }
@@ -580,6 +611,57 @@ mod tests {
     /// The question is positional and the root is a flag, so the shortest
     /// useful invocation is `kog query "what depends on X"` in the directory
     /// you are already standing in.
+    /// Every export is behind its own flag and none is a default: a scan
+    /// that wrote four files because you ran it is a scan you stop running.
+    #[test]
+    fn a_scan_writes_only_the_formats_it_was_asked_for() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path().join("project");
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::write(root.join("src/lib.ts"), "export const x = 1;").unwrap();
+        fs::write(root.join("src/a.ts"), r#"import { x } from "./lib";"#).unwrap();
+
+        let graphml = dir.path().join("g.graphml");
+        scan(root.clone(), None, Some(graphml.clone()), None).unwrap();
+
+        let written = fs::read_to_string(&graphml).unwrap();
+        assert!(written.contains("<node id=\"src/a.ts\">"), "got {written}");
+        assert!(written.contains("target=\"src/lib.ts\""));
+        assert!(
+            !dir.path().join("g.cypher").exists(),
+            "a format that was not asked for must not be written"
+        );
+
+        let cypher = dir.path().join("g.cypher");
+        scan(root, None, None, Some(cypher.clone())).unwrap();
+        assert!(fs::read_to_string(&cypher)
+            .unwrap()
+            .contains("MERGE (a)-[:IMPORTS]->(b)"));
+    }
+
+    #[test]
+    fn each_export_has_its_own_flag() {
+        let cli = Cli::try_parse_from([
+            "kog",
+            "scan",
+            "dir",
+            "--graphml",
+            "g.graphml",
+            "--cypher",
+            "g.cypher",
+        ])
+        .unwrap();
+        assert_eq!(
+            cli.command,
+            Some(Command::Scan {
+                root: PathBuf::from("dir"),
+                output: None,
+                graphml: Some(PathBuf::from("g.graphml")),
+                cypher: Some(PathBuf::from("g.cypher")),
+            })
+        );
+    }
+
     #[test]
     fn query_takes_the_question_first_and_defaults_the_root() {
         let cli = Cli::try_parse_from(["kog", "query", "what depends on src/a.ts"]).unwrap();

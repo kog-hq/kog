@@ -186,7 +186,7 @@ extractor would move its source coverage from 0.9319 to roughly 0.98.
 
 It is not being added, because the measurement says it would buy nothing:
 
-| Question | documenso | ~/Mastore (private, 9 projects) |
+| Question | documenso | ~/acme (private, 9 projects) |
 | --- | ---: | ---: |
 | `.sql` files | 163 | 56 |
 | in psql include form (`\i`, `\ir`) | 0 | 0 |

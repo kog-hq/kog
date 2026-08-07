@@ -14,7 +14,7 @@ pub mod tsconfig;
 
 pub use catalogue::{classify, Classification, Kind};
 pub use discover::{build_walker, discover, is_in_skipped_directory, survey, Survey, ALWAYS_SKIP};
-pub use export::{cypher, graphml, markdown, yaml};
+pub use export::{cypher, graphml, markdown, obsidian, yaml, Note};
 pub use extractor::{ExtractError, Extractor, Resolution, Specifier};
 pub use extractors::TypeScriptExtractor;
 pub use graph::build_graph;

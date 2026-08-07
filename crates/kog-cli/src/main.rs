@@ -44,6 +44,9 @@ enum Command {
         /// Also write the numbers as a Markdown report here.
         #[arg(long, value_name = "FILE")]
         markdown: Option<PathBuf>,
+        /// Also write an Obsidian vault here: one note per file, wikilinked.
+        #[arg(long, value_name = "DIR")]
+        obsidian: Option<PathBuf>,
     },
     /// Scan a project and serve the graph in a browser.
     ///
@@ -104,6 +107,7 @@ fn main() -> Result<()> {
             cypher,
             yaml,
             markdown,
+            obsidian,
         } => scan(
             root,
             Exports {
@@ -112,6 +116,7 @@ fn main() -> Result<()> {
                 cypher,
                 yaml,
                 markdown,
+                obsidian,
             },
         ),
         Command::View { root } => view(root),
@@ -290,6 +295,7 @@ struct Exports {
     cypher: Option<PathBuf>,
     yaml: Option<PathBuf>,
     markdown: Option<PathBuf>,
+    obsidian: Option<PathBuf>,
 }
 
 fn scan(root: PathBuf, exports: Exports) -> Result<()> {
@@ -312,6 +318,26 @@ fn scan(root: PathBuf, exports: Exports) -> Result<()> {
     write(exports.cypher, &|| kog_graph::cypher(&workspace))?;
     write(exports.yaml, &|| kog_graph::yaml(&workspace))?;
     write(exports.markdown, &|| kog_graph::markdown(&workspace))?;
+
+    // A vault is a directory of notes rather than one file, so it does not go
+    // through `write`.
+    if let Some(vault) = exports.obsidian {
+        let notes = kog_graph::obsidian(&workspace);
+        for note in &notes {
+            let path = vault.join(&note.path);
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)
+                    .with_context(|| format!("cannot create {}", parent.display()))?;
+            }
+            std::fs::write(&path, &note.body)
+                .with_context(|| format!("cannot write {}", path.display()))?;
+        }
+        println!(
+            "written                {} ({} notes)",
+            vault.display(),
+            notes.len()
+        );
+    }
 
     Ok(())
 }
@@ -350,7 +376,7 @@ fn view(root: PathBuf) -> Result<()> {
     }
 
     for request in server.incoming_requests() {
-        let decision = server::route(request.url(), &graph_json);
+        let decision = server::route(request.url(), &graph_json, &workspace);
         if let Err(e) = server::respond(request, decision) {
             eprintln!("warning: failed to respond to a request: {e}");
         }
@@ -616,6 +642,7 @@ mod tests {
                 cypher: None,
                 yaml: None,
                 markdown: None,
+                obsidian: None,
             })
         );
     }
@@ -654,6 +681,7 @@ mod tests {
                 cypher: None,
                 yaml: None,
                 markdown: None,
+                obsidian: None,
             })
         );
     }
@@ -724,6 +752,7 @@ mod tests {
                 cypher: Some(PathBuf::from("g.cypher")),
                 yaml: None,
                 markdown: None,
+                obsidian: None,
             })
         );
     }

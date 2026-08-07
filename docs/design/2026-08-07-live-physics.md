@@ -10,6 +10,12 @@ The target is explicit: **the graph view in Obsidian**. Not "something like it"
 graph was reached from this repository's own Obsidian vault export, which is why
 the comparison is available at all.
 
+Obsidian's own account states the stack: **d3-force for the simulation, PixiJS
+for the rendering**. So the solver chosen here is literally theirs; only the
+renderer differs, and sigma is already WebGL. Their documented drag behaviour
+also matches the choice made below — a released node is immediately re-subjected
+to the active forces rather than left pinned.
+
 ## What is being discarded, and the risk accepted
 
 ForceAtlas2 goes. With it go `gravity: 0.02`, the `scalingRatio` ladder,
@@ -145,6 +151,37 @@ second responsibility.
 Dependency added: `d3-force` alone (~10 kB), not `d3`. Bundled, no CDN — the
 page still never touches the network.
 
+### Three lifecycle rules, each learned by breaking it
+
+The spike's first live version looked completely dead: dragging a node moved
+nothing. All three causes are lifecycle, none are physics, and all three will
+recur in the real module.
+
+**1. The solver belongs to the renderer's effect, never to `buildGraph`.**
+`buildGraph` is a `useMemo` factory, and React may call it more than once per
+value it keeps. A solver started there ticks against a graph React discarded:
+the node ids still match, so a grab appears to succeed, and every position is
+written into an object nothing draws. `startPhysics(graph)` is called from the
+canvas effect, on the graph that renderer is drawing, and returns a stopper so
+the solver's life is exactly the renderer's life.
+
+**2. The solver must not tick before the effect has survived a frame.**
+`forceSimulation` starts its timer on construction, and strict mode mounts an
+effect, tears it down, and mounts it again. A tick landing in that gap makes
+sigma schedule a repaint for a renderer about to be killed, and the queued
+repaint then throws on the dead renderer's node programs. Build the simulation
+stopped and `restart()` it inside one `requestAnimationFrame`, cancelled by the
+stopper.
+
+**3. Every deferred callback in `graph-canvas.tsx` must re-check its renderer.**
+The fade loop captures `sigma.current` and is keyed on `[focus]` alone, so a
+graph change swaps the renderer underneath a loop still in flight; the camera
+settle timeout has the same shape. **This is a pre-existing defect, not one this
+work introduces** — but it is unobservable today, because with a frozen layout
+those loops are almost never running. A live layout runs them constantly. The
+guard is one line, `if (sigma.current !== renderer) return`, and it belongs in
+every deferred callback in the file.
+
 The bridge is the part worth stating. d3 wants its own objects
 (`{x, y, vx, vy, fx, fy}`); sigma reads graphology attributes. Positions are
 written back every tick through **one `updateEachNodeAttributes` call with
@@ -171,9 +208,21 @@ neighbourhood re-equilibrates around wherever it lands, and the layout is
 allowed to drift. This is Obsidian's behaviour and it is the point: the map is
 not a document being curated, it is an equilibrium being disturbed.
 
-d3's defaults settle over ~300 ticks, about five seconds — too slow for the
-target feel. `alphaDecay` near 0.056 gives roughly two seconds. It is a dial,
-not a constant, until §9 says otherwise.
+`alphaDecay` decides how many ticks the solver gets before it stops, and this
+document was wrong to treat "settles in ~2 s" as free. **The bloom's speed and
+the map's quality are the same dial**, pulling opposite ways:
+
+| `alphaDecay` | ticks | at 60 fps | result |
+| --- | --- | --- | --- |
+| 0.055 | 122 | ~2.0 s | brisk bloom, **under-relaxed map** — clusters freeze as dense discs |
+| 0.035 | 194 | ~3.2 s | compromise |
+| 0.023 (d3 default) | 297 | ~4.9 s | the airy map measured in §0, slow bloom |
+
+Measured, not projected: at 0.055 the spike froze after 123 ticks on a map that
+300 ticks had made readable. The likely way out is a partial head start — ~100
+ticks run headlessly before the first paint costs about 140 ms, not the second
+that §2 rejects, and the visible bloom then covers the remainder. To settle in
+§9.
 
 ## 5. Isolated nodes
 

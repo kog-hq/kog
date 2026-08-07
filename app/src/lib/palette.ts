@@ -192,6 +192,16 @@ export const CANVAS: Record<
     label: string;
     labelHalo: string;
     focus: string;
+    /**
+     * The colour a read neighbourhood is drawn in.
+     *
+     * Not `focus`, which is the maximum-contrast ink — near-black on light,
+     * near-white on dark. A hub with two hundred dependents drawn in maximum
+     * contrast is two hundred black rays across the canvas, which is louder
+     * than the thing it is pointing at. An accent carries the same "this one"
+     * without the weight.
+     */
+    accent: string;
   }
 > = {
   dark: {
@@ -202,6 +212,7 @@ export const CANVAS: Record<
     label: "#e8e8ea",
     labelHalo: "rgba(13,13,15,0.82)",
     focus: "#f4f5f8",
+    accent: "#8b7cf6",
   },
   light: {
     background: "#fbfbfd",
@@ -211,6 +222,7 @@ export const CANVAS: Record<
     label: "#15151a",
     labelHalo: "rgba(251,251,253,0.86)",
     focus: "#101014",
+    accent: "#7c5cf0",
   },
 };
 

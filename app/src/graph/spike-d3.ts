@@ -63,6 +63,8 @@ function dials(params: URLSearchParams) {
     velocityDecay: num("velocityDecay", 0.4),
     /** How hard a drag reheats the solver. */
     dragAlpha: num("dragAlpha", 0.3),
+    /** How much heat a release buys, so the springs can pull the node home. */
+    releaseAlpha: num("releaseAlpha", 0.45),
     /** Multiplier on the Louvain seed's radius. Small starts bloom. */
     seed: num("seed", 0.35),
   };
@@ -210,11 +212,22 @@ export function spikeMove(x: number, y: number): void {
   grabbed.fy = y;
 }
 
-/** Let go. The node keeps its velocity; nothing returns it anywhere. */
+/**
+ * Let go, and give the springs enough heat to pull the node home.
+ *
+ * Clearing the pin and dropping alphaTarget to 0 is not enough on its own:
+ * the solver is already cold by the end of a drag, so the node simply stayed
+ * wherever it was dropped and the graph kept the dent. Re-raising alpha buys
+ * roughly a hundred ticks — enough for the neighbourhood to close back over
+ * it, which is what makes a tug a question rather than an edit.
+ */
 export function spikeRelease(): void {
   if (!spikeOn || !simulation || !grabbed) return;
   grabbed.fx = null;
   grabbed.fy = null;
   grabbed = null;
-  simulation.alphaTarget(0);
+  simulation
+    .alphaTarget(0)
+    .alpha(Math.max(simulation.alpha(), dials(params).releaseAlpha))
+    .restart();
 }

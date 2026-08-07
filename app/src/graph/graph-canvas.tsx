@@ -150,11 +150,17 @@ type Props = CanvasState & {
 };
 
 /**
- * Draw a node's name over a slab of background.
+ * Draw a node's name centred beneath it.
  *
- * Sigma paints label text straight onto the canvas, so a name crossing a
- * dense patch of edges becomes unreadable exactly where the graph is most
- * worth reading. The halo is the whole point of overriding the renderer.
+ * There used to be a slab of background behind every name, because a name
+ * crossing a dense patch of edges is unreadable. That was a fix for the wrong
+ * problem: the slabs turned a graph with every label on into a wall of boxes,
+ * and the real complaint was never legibility but noise. Faint edges make the
+ * halo unnecessary; the halo never made the edges quieter.
+ *
+ * The colour comes from the reducer as `labelInk`, so a name fades with the
+ * node it belongs to instead of being switched off at some threshold. A hard
+ * cut is what reads as flicker while the pointer moves.
  */
 function labelDrawer(theme: CanvasTheme, bold = false) {
   return (
@@ -168,17 +174,11 @@ function labelDrawer(theme: CanvasTheme, bold = false) {
     if (!data.label) return;
     const size = settings.labelSize;
     context.font = `${bold ? 600 : settings.labelWeight} ${size}px ${settings.labelFont}`;
-    const width = context.measureText(data.label).width;
-    const x = data.x + data.size + 5;
-    const y = data.y + size / 3;
-
-    context.fillStyle = theme.labelHalo;
-    context.beginPath();
-    context.roundRect(x - 4, y - size + 1, width + 8, size + 5, 4);
-    context.fill();
-
-    context.fillStyle = bold ? theme.focus : theme.label;
-    context.fillText(data.label, x, y);
+    const ink = (data as { labelInk?: string }).labelInk;
+    context.fillStyle = bold ? theme.focus : (ink ?? theme.label);
+    context.textAlign = "center";
+    context.fillText(data.label, data.x, data.y + data.size + size + 2);
+    context.textAlign = "left";
   };
 }
 
@@ -422,7 +422,16 @@ export function GraphCanvas(props: Props) {
       original: Event;
     }) => {
       if (!dragged) return;
-      const at = renderer.viewportToGraph(event);
+      // Held inside the frame. Dragging a node past the edge used to keep
+      // pulling — the pointer left the canvas, the spring stayed stretched,
+      // and the centre force dragged the whole graph after it, so the picture
+      // slid off the top of the screen with nothing to stop it. The cursor may
+      // leave; the node may not.
+      const { width, height } = renderer.getDimensions();
+      const at = renderer.viewportToGraph({
+        x: Math.min(width, Math.max(0, event.x)),
+        y: Math.min(height, Math.max(0, event.y)),
+      });
       // THROWAWAY SPIKE — with a solver running, the node is moved by pinning
       // it, not by writing its position: writing would fight the next tick.
       if (spikeOn) {
@@ -625,7 +634,11 @@ export function GraphCanvas(props: Props) {
           ...data,
           color: towards(canvas.dim, fill, away),
           size: data.size * (1 - 0.45 * away),
-          label: away > 0.5 ? "" : data.label,
+          // The name fades with its node rather than vanishing at a
+          // threshold. Pushed further than the node itself: text at half
+          // strength still reads as text, where a dot at half strength has
+          // already stopped competing.
+          labelInk: towards(canvas.background, canvas.label, 1 - 0.85 * away),
           zIndex: 0,
         };
       }
@@ -654,21 +667,23 @@ export function GraphCanvas(props: Props) {
         // What the anchor uses: the focus colour, the thing you are
         // following. What uses the anchor: the plain foreground. The two
         // directions never have to be guessed from arrowheads alone.
+        // Both directions in the accent, distinguished by weight rather than
+        // by two competing inks. A hub's two hundred rays have to be legible
+        // as a fan, and two colours at that density read as a mess.
         if (source === focus.anchor && focus.uses.has(target)) {
           return {
             ...data,
             type: "arrow",
-            color: canvas.focus,
-            size: 1.4,
+            color: canvas.accent,
+            size: 0.9,
             zIndex: 2,
           };
         }
         if (target === focus.anchor && focus.usedBy.has(source)) {
           return {
             ...data,
-            type: "arrow",
-            color: canvas.label,
-            size: 1,
+            color: mix(canvas.accent, canvas.background, 0.72),
+            size: 0.6,
             zIndex: 2,
           };
         }

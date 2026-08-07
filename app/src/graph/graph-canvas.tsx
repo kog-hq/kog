@@ -94,6 +94,18 @@ const HOVER_DELAY_MS = 140;
 /** How long the rest of the graph takes to fade back, in milliseconds. */
 const FADE_MS = 180;
 
+/**
+ * How many distinct steps the fade is quantised to.
+ *
+ * Blending a colour means parsing two hex strings and formatting a third, and
+ * the dimmed set is most of the graph — at 60 frames a second on 2,800 nodes
+ * that is a quarter of a million string operations per second, which is what
+ * made the fade stutter rather than glide. Quantising lets the results be
+ * cached: sixteen steps is more than the eye resolves over 180 ms, and it
+ * turns the per-frame cost into a map lookup.
+ */
+const FADE_STEPS = 16;
+
 function prefersReducedMotion(): boolean {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
@@ -348,10 +360,14 @@ export function GraphCanvas(props: Props) {
     // Hover, after the pointer has stopped. See `HOVER_DELAY_MS`.
     let resting: number | undefined;
     renderer.on("enterNode", ({ node }) => {
+      // A node is clickable and draggable, so it should say so before you
+      // find out by trying.
+      if (container.current) container.current.style.cursor = "pointer";
       window.clearTimeout(resting);
       resting = window.setTimeout(() => onHover(node), HOVER_DELAY_MS);
     });
     renderer.on("leaveNode", () => {
+      if (container.current) container.current.style.cursor = "";
       window.clearTimeout(resting);
       onHover(null);
     });
@@ -361,6 +377,7 @@ export function GraphCanvas(props: Props) {
     let dragged: string | null = null;
     renderer.on("downNode", ({ node }) => {
       dragged = node;
+      if (container.current) container.current.style.cursor = "grabbing";
       renderer.getCamera().disable();
     });
     const mouse = renderer.getMouseCaptor();
@@ -383,6 +400,7 @@ export function GraphCanvas(props: Props) {
     const onRelease = () => {
       if (!dragged) return;
       dragged = null;
+      if (container.current) container.current.style.cursor = "pointer";
       renderer.getCamera().enable();
     };
     mouse.on("mousemovebody", onMove);
@@ -457,6 +475,18 @@ export function GraphCanvas(props: Props) {
     const canvas = canvasTheme(theme);
     const ink = edgeInk(graph.size, theme);
 
+    // Keyed by fill and step, and rebuilt whenever the palette can change.
+    const dimmed = new Map<string, string>();
+    const towardsBackground = (fill: string, away: number): string => {
+      const step = Math.round(away * FADE_STEPS);
+      const key = `${fill}|${step}`;
+      const cached = dimmed.get(key);
+      if (cached !== undefined) return cached;
+      const blended = mix(canvas.dim, fill, step / FADE_STEPS);
+      dimmed.set(key, blended);
+      return blended;
+    };
+
     renderer.setSetting("nodeReducer", (node, data) => {
       if (visible && !visible.has(node)) return { ...data, hidden: true };
       // Colour is computed here rather than stored on the node, so the
@@ -508,7 +538,7 @@ export function GraphCanvas(props: Props) {
         const away = fade.current;
         return {
           ...data,
-          color: mix(canvas.dim, fill, away),
+          color: towardsBackground(fill, away),
           size: data.size * (1 - 0.45 * away),
           label: away > 0.5 ? "" : data.label,
           zIndex: 0,

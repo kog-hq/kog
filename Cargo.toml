@@ -29,6 +29,8 @@ tiny_http = "0.12"
 tree-sitter = "0.26"
 tree-sitter-typescript = "0.23"
 toml = "1"
+# `serde_yaml` is deprecated upstream; this is the maintained successor.
+yaml_serde = "0.10"
 tree-sitter-bash = "0.25"
 tree-sitter-c-sharp = "0.23"
 tree-sitter-cpp = "0.23"

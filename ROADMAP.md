@@ -140,10 +140,17 @@ and uses `MERGE` throughout, so re-running a scan updates one graph rather than 
 second beside it. Ids are project-qualified, so a workspace of nine projects does not merge
 nine `src/index.ts` into one node.
 
-**SVG is not shipped, and is not planned in this form.** It needs a layout; the only layout
-KOG has runs in the browser, and writing a worse one in Rust would produce a picture that
-looks authoritative and is arbitrary — which is the failure this project is against. Both
-formats above hand the graph to tools that lay it out far better.
+`--yaml` is the same record as the JSON, and `--markdown` is the odd one out: not the graph
+but the *report* — the two numbers, the rate per language, what was not read, the files
+everything points at, and every import that did not become an edge. It is the one export a
+person reads rather than a tool.
+
+**No image is written by the Rust side, and that is the decision rather than a gap.** SVG,
+PNG and PDF all need a layout; the only layout KOG has runs in the browser. Writing a worse
+one in Rust would produce a picture that looks authoritative and is arbitrary, and a second
+layout would drift from the first besides. So the interface exports the PNG — exactly what
+is on screen, laid out by the code that laid it out — and the formats above hand the graph
+to tools that lay it out far better than either.
 
 ---
 

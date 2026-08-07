@@ -1,4 +1,4 @@
-import { Moon, Search, Sun, TriangleAlert } from "lucide-react";
+import { Download, Moon, Search, Sun, TriangleAlert } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
@@ -206,6 +206,7 @@ export function Rail({
   onTheme,
   onSelect,
   onHover,
+  onExport,
 }: {
   workspace: KogWorkspace;
   project: KogProject;
@@ -229,6 +230,7 @@ export function Rail({
   onTheme: () => void;
   onSelect: (id: string) => void;
   onHover: (id: string | null) => void;
+  onExport: () => void;
 }) {
   const { stats } = project.graph;
   const coverage = stats.coverage;
@@ -486,6 +488,17 @@ export function Rail({
             />
           </PopoverContent>
         </Popover>
+
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onExport}
+          aria-label="Download the graph as a PNG"
+          title="Download the graph as a PNG"
+          className="size-7 shrink-0"
+        >
+          <Download className="size-3.5" />
+        </Button>
 
         <Button
           variant="ghost"

@@ -13,14 +13,20 @@
 //! displays one, so a workspace of nine projects does not silently merge nine
 //! `src/index.ts` into one node in Neo4j.
 //!
+//! [`markdown`] is the odd one out: it is not the graph, it is the *report* —
+//! the two numbers, the rate per language, what was not read, and the files
+//! everything points at. It is what you paste into a pull request, and it is
+//! the one export a person reads rather than a tool.
+//!
 //! ## What is not here
 //!
-//! **SVG.** It is on the roadmap and it is not in this file, for a reason
-//! worth stating: an SVG needs a layout, and the only layout KOG has runs in
-//! the browser. Writing a worse one in Rust to produce a picture that *looks*
-//! authoritative is the failure this project is against — and both formats
-//! below hand the graph to tools whose layouts are far better than anything
-//! that would be written here.
+//! **Any picture — SVG, PNG, PDF.** All three need a layout, and the only
+//! layout KOG has runs in the browser. Writing a worse one in Rust to produce
+//! an image that *looks* authoritative is the failure this project is
+//! against, and a second layout would drift from the first besides. The
+//! interface exports a PNG of exactly what you are looking at, which is the
+//! same graph laid out by the code that laid it out on screen; the formats
+//! here hand the graph to tools whose layouts are better than either.
 
 use crate::model::NodeKind;
 use crate::project::Workspace;
@@ -185,6 +191,159 @@ pub fn cypher(workspace: &Workspace) -> String {
     out
 }
 
+/// The whole workspace as YAML: the same record as the JSON, for anything
+/// that would rather read one.
+pub fn yaml(workspace: &Workspace) -> String {
+    yaml_serde::to_string(workspace).unwrap_or_else(|error| format!("# kog: {error}\n"))
+}
+
+/// One row of the "most depended upon" table.
+fn hubs(project: &crate::project::Project, take: usize) -> Vec<(usize, &str)> {
+    let mut counted: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for edge in &project.graph.edges {
+        *counted.entry(edge.target.as_str()).or_default() += 1;
+    }
+    let mut hubs: Vec<(usize, &str)> = counted.into_iter().map(|(id, n)| (n, id)).collect();
+    hubs.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(b.1)));
+    hubs.truncate(take);
+    hubs
+}
+
+/// How many rows a table shows before it starts counting instead. Every one
+/// of them still reports its true total on the line above.
+const TABLE_ROWS: usize = 15;
+
+/// The scan as a report a person reads.
+///
+/// Every number here is one the scan already published; nothing is computed
+/// for the document that is not in the JSON beside it. A truncated table says
+/// what it left out, for the same reason every other listing in this codebase
+/// does.
+pub fn markdown(workspace: &Workspace) -> String {
+    let totals = &workspace.totals;
+    let mut out = String::new();
+    // Written line by line rather than as one continued literal: a stray
+    // leading space is invisible in the source and turns a Markdown table
+    // into an indented code block, which is exactly what happened the first
+    // time this was written.
+    let _ = writeln!(out, "# Scan of `{}`\n", workspace.root);
+    let _ = writeln!(out, "| | |");
+    let _ = writeln!(out, "| --- | ---: |");
+    let _ = writeln!(
+        out,
+        "| **Resolution rate** | **{:.4}** |",
+        totals.resolution_rate
+    );
+    let _ = writeln!(
+        out,
+        "| **Source coverage** | **{:.4}** |",
+        totals.source_coverage
+    );
+    let _ = writeln!(out, "| Projects | {} |", totals.projects);
+    let _ = writeln!(out, "| Files seen | {} |", totals.files_seen);
+    let _ = writeln!(out, "| Analysed | {} |", totals.files_analysed);
+    let _ = writeln!(out, "| Not read | {} |", totals.files_unsupported);
+    let _ = writeln!(out, "| Nodes | {} |", totals.nodes);
+    let _ = writeln!(out, "| Edges | {} |", totals.edges);
+    out.push_str(
+        "\n`resolution rate = resolved / (internal − excluded)` — of the imports KOG read, \
+how many pointed at a file it found.\n\n\
+`source coverage = analysed / (analysed + unsupported)` — of the files that are source \
+code, how many an extractor actually read. The first number alone lets a tool that reads \
+one language score 1.0000 on a polyglot repository.\n",
+    );
+
+    for project in &workspace.projects {
+        let stats = &project.graph.stats;
+        if workspace.split {
+            let _ = write!(
+                out,
+                "\n## `{}`\n\nRate {:.4}, coverage {:.4}, {} nodes, {} edges.\n",
+                project.id,
+                stats.resolution_rate,
+                stats.coverage.source_coverage(),
+                project.graph.nodes.len(),
+                project.graph.edges.len(),
+            );
+        }
+
+        // A language ships when it passes its own gate, so each publishes its
+        // own rate: an aggregate can be healthy while one resolver is broken.
+        out.push_str("\n### By language\n\n| Language | Files | Edges | Rate |\n| --- | ---: | ---: | ---: |\n");
+        for (lang, lang_stats) in &stats.by_lang {
+            let _ = writeln!(
+                out,
+                "| {lang} | {} | {} | {:.4} |",
+                lang_stats.files, lang_stats.edges, lang_stats.resolution_rate
+            );
+        }
+
+        let gaps: Vec<_> = stats
+            .coverage
+            .extensions
+            .iter()
+            .filter(|entry| entry.status == crate::model::FileStatus::UnsupportedLanguage)
+            .collect();
+        if !gaps.is_empty() {
+            let _ = writeln!(
+                out,
+                "\n### Not read — {} files\n",
+                stats.coverage.files_unsupported
+            );
+            out.push_str(
+                "These are nodes in the graph; their own imports are not, because KOG has no \
+extractor for them yet.\n\n| Extension | Files | Language |\n| --- | ---: | --- |\n",
+            );
+            for gap in gaps.iter().take(TABLE_ROWS) {
+                let _ = writeln!(
+                    out,
+                    "| `{}` | {} | {} |",
+                    gap.label,
+                    gap.count,
+                    gap.lang.as_deref().unwrap_or("unrecognised")
+                );
+            }
+            if gaps.len() > TABLE_ROWS {
+                let _ = writeln!(out, "\n… and {} more extensions.", gaps.len() - TABLE_ROWS);
+            }
+        }
+
+        let hubs = hubs(project, TABLE_ROWS);
+        if !hubs.is_empty() {
+            out.push_str("\n### Most depended upon\n\n| Dependents | File |\n| ---: | --- |\n");
+            for (count, id) in hubs {
+                let _ = writeln!(out, "| {count} | `{id}` |");
+            }
+        }
+
+        let broken = stats.unresolved + stats.excluded;
+        if broken > 0 {
+            let shown = stats.diagnostics.len().min(TABLE_ROWS);
+            let _ = writeln!(
+                out,
+                "\n### Every import that did not become an edge — {broken}\n"
+            );
+            out.push_str("| File | Line | Specifier | Why |\n| --- | ---: | --- | --- |\n");
+            for diagnostic in stats.diagnostics.iter().take(TABLE_ROWS) {
+                let _ = writeln!(
+                    out,
+                    "| `{}` | {} | `{}` | {} |",
+                    diagnostic.path, diagnostic.line, diagnostic.specifier, diagnostic.reason
+                );
+            }
+            if broken > shown {
+                let _ = writeln!(
+                    out,
+                    "\n… and {} more. The count above is exact; this table is not the record — `kog scan -o graph.json` is.",
+                    broken - shown
+                );
+            }
+        }
+    }
+
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -282,6 +441,88 @@ mod tests {
 
         assert_eq!(cypher_string(r#"a"b\c"#), r#"a\"b\\c"#);
         assert_eq!(cypher_string("a\nb"), "a\\nb");
+    }
+
+    #[test]
+    fn yaml_round_trips_to_the_same_workspace() {
+        let (_dir, workspace) = one_project();
+        let text = yaml(&workspace);
+        let back: Workspace = yaml_serde::from_str(&text).expect("kog must emit valid YAML");
+        assert_eq!(back, workspace, "YAML must be the same record as the JSON");
+    }
+
+    #[test]
+    fn the_markdown_report_leads_with_the_two_numbers() {
+        let (_dir, workspace) = one_project();
+        let report = markdown(&workspace);
+
+        assert!(report.starts_with("# Scan of "), "got {report}");
+        assert!(
+            report.contains("**Resolution rate** | **1.0000**"),
+            "got {report}"
+        );
+        assert!(report.contains("**Source coverage**"));
+        assert!(report.contains("### By language"));
+        assert!(report.contains("| typescript |"));
+        assert!(
+            report.contains("### Most depended upon"),
+            "the hubs are the first useful thing about an unfamiliar repository"
+        );
+        assert!(report.contains("`src/lib.ts`"));
+    }
+
+    /// A report that quietly showed fifteen of six hundred broken imports
+    /// would read as a repository with fifteen. The count is exact and the
+    /// table says what it left out — the same rule as every other listing
+    /// here.
+    #[test]
+    fn a_truncated_table_says_what_it_left_out() {
+        let dir = TempDir::new().unwrap();
+        write_file(&dir, "package.json", r#"{"name":"app"}"#);
+        let mut body = String::new();
+        for i in 0..40 {
+            body.push_str(&format!("import x{i} from \"./ghost{i}\";\n"));
+        }
+        write_file(&dir, "src/a.ts", &body);
+        let workspace = scan_workspace(dir.path());
+
+        let report = markdown(&workspace);
+        assert!(
+            report.contains("did not become an edge — 40"),
+            "got {report}"
+        );
+        assert!(report.contains("… and 25 more"), "got {report}");
+    }
+
+    /// A leading space is invisible in the source and fatal in the output:
+    /// four of them turn a Markdown table into an indented code block, so the
+    /// table renders as literal text. The first version of this report did
+    /// exactly that, and nothing but reading the file would have shown it.
+    #[test]
+    fn no_line_of_the_report_starts_with_whitespace() {
+        // A split scan with enough broken imports to truncate a table: the
+        // first version of this guard only built one project and missed three
+        // indented blocks that only a second project reached.
+        let dir = TempDir::new().unwrap();
+        for name in ["web", "api"] {
+            write_file(&dir, &format!("{name}/package.json"), r#"{"name":"p"}"#);
+            let mut body = String::new();
+            for i in 0..30 {
+                body.push_str(&format!("import x{i} from \"./ghost{i}\";\n"));
+            }
+            write_file(&dir, &format!("{name}/src/a.ts"), &body);
+            write_file(&dir, &format!("{name}/main.hs"), "module Main where");
+        }
+        let workspace = scan_workspace(dir.path());
+        assert!(workspace.split, "the guard must cover a split scan");
+
+        for (number, line) in markdown(&workspace).lines().enumerate() {
+            assert!(
+                !line.starts_with(char::is_whitespace),
+                "line {} is indented, which Markdown reads as a code block: {line:?}",
+                number + 1
+            );
+        }
     }
 
     #[test]

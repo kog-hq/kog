@@ -278,3 +278,36 @@ export type CanvasTheme = (typeof CANVAS)[Theme] & { mode: Theme };
 export function canvasTheme(theme: Theme): CanvasTheme {
   return { ...CANVAS[theme], mode: theme };
 }
+
+/**
+ * The graph as a PNG, composited from sigma's layers.
+ *
+ * The picture comes from the browser because the *layout* does. KOG's Rust
+ * side deliberately exports no image: it would need a second layout, it would
+ * be worse than this one, and two layouts drift. What you get here is exactly
+ * what you were looking at.
+ *
+ * Sigma draws onto several stacked canvases — edges, nodes, labels — so they
+ * are painted in order onto one. The mouse layer is skipped: it is a
+ * transparent event surface, and drawing it would be harmless but meaningless.
+ */
+export function graphToPng(container: HTMLElement, theme: Theme): string | null {
+  const layers = [...container.querySelectorAll("canvas")].filter(
+    (canvas) => !canvas.classList.contains("sigma-mouse"),
+  );
+  const first = layers[0];
+  if (!first) return null;
+
+  const out = document.createElement("canvas");
+  out.width = first.width;
+  out.height = first.height;
+  const context = out.getContext("2d");
+  if (!context) return null;
+
+  // A transparent PNG of a light-on-dark graph is invisible in most viewers,
+  // so the theme's own background is painted first.
+  context.fillStyle = CANVAS[theme].background;
+  context.fillRect(0, 0, out.width, out.height);
+  for (const layer of layers) context.drawImage(layer, 0, 0);
+  return out.toDataURL("image/png");
+}

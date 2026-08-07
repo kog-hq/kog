@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   GraphCanvas,
   defaultLabelMode,
@@ -12,6 +12,7 @@ import { detectCommunities } from "@/graph/communities";
 import type { ColourBy } from "@/graph/build";
 import { NO_FILTERS, type Filters } from "@/components/panels";
 import { indexProject, type KogWorkspace } from "@/lib/kog";
+import { graphToPng } from "@/lib/palette";
 
 type Theme = "light" | "dark";
 
@@ -126,6 +127,19 @@ export function App({ workspace }: { workspace: KogWorkspace }) {
     return folders;
   }, [filters, project, index, groupByFolder, communities, hiddenCommunities]);
 
+  const canvasArea = useRef<HTMLElement>(null);
+
+  /** Download the graph exactly as it is on screen. */
+  const onExport = useCallback(() => {
+    if (!canvasArea.current) return;
+    const png = graphToPng(canvasArea.current, theme);
+    if (!png) return;
+    const link = document.createElement("a");
+    link.href = png;
+    link.download = `${project.name || "graph"}.png`;
+    link.click();
+  }, [project.name, theme]);
+
   const selectedNode = selected ? index.byId.get(selected) : undefined;
   const onSelect = useCallback((id: string | null) => setSelected(id), []);
 
@@ -156,9 +170,10 @@ export function App({ workspace }: { workspace: KogWorkspace }) {
         onTheme={() => setTheme(theme === "dark" ? "light" : "dark")}
         onSelect={setSelected}
         onHover={setHovered}
+        onExport={onExport}
       />
 
-      <main className="relative min-w-0 flex-1">
+      <main ref={canvasArea} className="relative min-w-0 flex-1">
         <GraphCanvas
           project={project}
           index={index}

@@ -102,12 +102,15 @@ a scan that wrote four files because you ran it is a scan you stop running:
 ```bash
 kog scan --graphml g.graphml   # Gephi, yEd, Cytoscape
 kog scan --cypher g.cypher     # cat g.cypher | cypher-shell -u neo4j
+kog scan --yaml g.yaml         # the same record as the JSON
+kog scan --markdown report.md  # the numbers, as a report you can paste into a PR
 ```
 
-There is no SVG export, deliberately: an SVG needs a layout, the only layout KOG has runs
-in the browser, and a worse one written in Rust would produce a picture that looks
-authoritative and is arbitrary. Both formats above hand the graph to tools whose layouts
-are better than anything that would be written here.
+The interface exports the **PNG** — the download button beside the theme toggle saves
+exactly what is on screen. The picture comes from the browser because the *layout* does:
+KOG's Rust side deliberately draws nothing, since it would need a second layout, that one
+would be worse, and two layouts drift. For a PDF, print the Markdown report with any
+converter, or print the page from the browser.
 
 The server binds to `127.0.0.1` on an OS-assigned port and prints the URL before opening
 anything, so `kog` over SSH still tells you where to look.

@@ -241,11 +241,26 @@ report names them as unrecognised rather than pretending to know.
 
 ## Still weak, stated plainly
 
-- **C++ at 0.8732.** All 18 unresolved specifiers on `fmtlib/fmt` are
-  third-party headers — `gtest/gtest.h`, `gmock/gmock.h`, `absl/...`. They are
-  dependencies and should leave the denominator as `external`; instead the
-  C-like resolver probes them as internal and fails closed. Same class of
-  defect as the Go bug above, one order of magnitude smaller. Not yet fixed.
+- **C and C++ do not read their build systems.** This was first written up as
+  "third-party headers probed as internal", which turned out to be only 4 of
+  the 18 misses on `fmtlib/fmt`. Those four (`absl/...`) are genuinely absent
+  from the repository and now count as dependencies: an include naming a
+  directory the project does not have *anywhere* could never have resolved,
+  which is the same fact that makes `import react` external. C++ went 0.8732 →
+  **0.8986**, C 0.9681 → **0.9693**.
+
+  The remaining misses are a different thing entirely, and worth naming
+  precisely: **the header is in the repository**. `fmt` vendors
+  `test/gtest/gtest/gtest.h` and includes it as `"gtest/gtest.h"`; `curl` has
+  `tests/libtest/unitcheck.h` and includes it as `"unitcheck.h"` 85 times.
+  Both work because the include directory is declared in CMake or Automake —
+  `target_include_directories`, `AM_CPPFLAGS` — and KOG reads neither. It
+  searches the conventional places (`include/`, `src/`, the importing file's
+  ancestors) and no more.
+
+  So the published C and C++ rates are honest about what KOG can see and
+  understate what the compiler can. Reading those directives is the fix, and
+  it is a real piece of work rather than a heuristic.
 - **shell at 0.7778 and javascript at 0.2500** are 9 and 4 specifiers
   respectively. Neither is a gate; both are samples too small to mean anything,
   and both are reported rather than hidden. Shell's two are

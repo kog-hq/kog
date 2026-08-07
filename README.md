@@ -258,10 +258,11 @@ Stated plainly, because a tool that only advertises its strengths is not measuri
   Swift, Kotlin, Scala, Elixir, and every template language — but its own imports are not
   read. The report says which, and how many. That count is derived from the registry by a
   test, not written by hand: it had drifted to "sixteen" and nothing caught it.
-- **C++ is at 0.8732 and is not fixed.** Every unresolved specifier on `fmtlib/fmt` is a
-  third-party header (`gtest`, `gmock`, `absl`) that should count as a dependency and
-  leave the denominator; instead it is probed as internal and fails closed. Published
-  rather than rounded away.
+- **C and C++ do not read CMake or Automake.** An include directory declared with
+  `target_include_directories` or `AM_CPPFLAGS` is invisible, so a header that is really
+  in the repository can still read as missing — `curl` includes its own
+  `tests/libtest/unitcheck.h` 85 times that way. C sits at 0.9693 and C++ at 0.8986:
+  honest about what KOG can see, an understatement of what the compiler can.
 - **SQL is deliberately not read.** All 163 `.sql` files on documenso are Prisma
   migrations, and migrations do not reference one another: 0 psql includes, 0 files
   naming another. An extractor would add 163 nodes with no edges and move source coverage

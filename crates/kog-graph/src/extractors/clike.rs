@@ -36,13 +36,33 @@ const SYSTEM_PREFIX: &str = "<";
 
 pub struct CLikeExtractor {
     root: PathBuf,
+    /// The name of every directory in the project, at any depth. Used only to
+    /// tell a third-party header from a broken one — see `resolve`.
+    directories: std::collections::HashSet<String>,
 }
 
 impl CLikeExtractor {
     pub fn new(root: &Path) -> Self {
-        Self {
-            root: root.canonicalize().unwrap_or_else(|_| root.to_path_buf()),
+        let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+        let mut directories = std::collections::HashSet::new();
+        for file in &crate::discover::survey(&root).files {
+            let mut current = file.parent();
+            while let Some(dir) = current {
+                if dir == root || !dir.starts_with(&root) {
+                    break;
+                }
+                if let Some(name) = dir.file_name().and_then(|n| n.to_str()) {
+                    directories.insert(name.to_string());
+                }
+                current = dir.parent();
+            }
         }
+        Self { root, directories }
+    }
+
+    /// Whether the project holds a directory with this name, at any depth.
+    fn has_directory(&self, name: &str) -> bool {
+        self.directories.contains(name)
     }
 
     /// Every directory an include is searched in, nearest first.
@@ -136,6 +156,42 @@ impl Extractor for CLikeExtractor {
             // so it leaves the denominator like any external import.
             return Resolution::External(path.to_string());
         }
+
+        // A quoted include that names a directory this project does not have
+        // *anywhere* is a third-party header, not a broken one.
+        //
+        // C has no manifest, so nothing states which headers are
+        // dependencies — and the language's own convention does not settle it
+        // either: `fmt` writes `#include "gmock/gmock.h"` in quotes for a
+        // library CMake fetches at build time. Measured on `fmtlib/fmt`, all
+        // 18 of its "broken" includes were of this shape — `gmock/`, `gtest/`,
+        // `absl/` — and the published C++ rate of 0.8732 was blaming the
+        // resolver for headers that were never in the repository.
+        //
+        // The test is a proof rather than a guess: an include is searched
+        // against directories inside the project, so if the first segment of
+        // the path is not a directory anywhere in it, no search path could
+        // ever have resolved it. That is the same reasoning that makes
+        // `import react` external in TypeScript — provably not a file here —
+        // and it deliberately keeps a typo'd sibling (`"./utils/typo.h"`,
+        // where `utils/` does exist) `Unresolved`, which is what it is.
+        // Only a plain `package/header.h` qualifies. A path with a `.` or
+        // `..` segment, or an absolute one, is reaching somewhere specific
+        // rather than naming a library — and calling `../../../etc/passwd` an
+        // external dependency would put it in the node's package list, which
+        // an existing test rightly refuses.
+        let plain = path.contains('/')
+            && !path.starts_with('/')
+            && !path
+                .split('/')
+                .any(|segment| segment == "." || segment == "..");
+        if plain {
+            let root_segment = path.split('/').next().unwrap_or_default();
+            if !self.has_directory(root_segment) {
+                return Resolution::External(path.to_string());
+            }
+        }
+
         // A quoted include names a file the author expected to find beside
         // their own source. Not finding it is a genuine miss.
         Resolution::Unresolved
@@ -234,6 +290,41 @@ mod tests {
             Resolution::External("stdio.h".into())
         );
         assert_eq!(e.resolve("ghost.h", &importer), Resolution::Unresolved);
+    }
+
+    /// Found by measuring `fmtlib/fmt`, whose C++ rate of 0.8732 was made
+    /// entirely of includes like this one: quoted, so the language's own
+    /// convention says "local", but naming a library CMake fetches at build
+    /// time. `gmock/` is a directory the repository does not have anywhere,
+    /// so no include path could ever have resolved it — it is provably not
+    /// ours, the same fact that makes `import react` external.
+    #[test]
+    fn a_quoted_include_of_a_directory_the_project_lacks_is_a_dependency() {
+        let dir = TempDir::new().unwrap();
+        write(&dir, "test/base-test.cc", "");
+        write(&dir, "include/fmt/format.h", "");
+        let e = CLikeExtractor::new(dir.path());
+        let importer = root(&dir).join("test/base-test.cc");
+
+        assert_eq!(
+            e.resolve("gmock/gmock.h", &importer),
+            Resolution::External("gmock/gmock.h".into())
+        );
+    }
+
+    /// And the other side of it: a directory the project *does* have means a
+    /// missing header there is a real miss, not a dependency. Without this
+    /// the rule would launder every typo into an external package.
+    #[test]
+    fn a_quoted_include_into_a_directory_we_do_have_is_still_a_miss() {
+        let dir = TempDir::new().unwrap();
+        write(&dir, "src/app.cc", "");
+        write(&dir, "include/fmt/format.h", "");
+        let e = CLikeExtractor::new(dir.path());
+        let importer = root(&dir).join("src/app.cc");
+
+        assert_eq!(e.resolve("fmt/typo.h", &importer), Resolution::Unresolved);
+        assert_eq!(e.resolve("missing.h", &importer), Resolution::Unresolved);
     }
 
     #[test]

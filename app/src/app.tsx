@@ -186,6 +186,7 @@ export function App({ workspace }: { workspace: KogWorkspace }) {
           colourBy={colourBy}
           theme={theme}
           onSelect={onSelect}
+          onHover={setHovered}
           capture={capture}
         />
 

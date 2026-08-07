@@ -42,6 +42,27 @@ fn qualified(project: &str, id: &str) -> String {
     }
 }
 
+/// A link to another note, in the form Obsidian can actually follow.
+///
+/// A wikilink cannot carry `[`, `]`, `#`, `|` or `^`: the parser stops at the
+/// first one and the link is dead. That is not exotic — a Next.js route is
+/// `app/(auth)/contracts/[id]/page.tsx`, and a catch-all is `[...all]`. On one
+/// real workspace 46 links were broken this way, which in Obsidian's graph
+/// view is 46 edges that simply are not there.
+///
+/// Those paths get a Markdown link with an angle-bracketed target instead,
+/// which takes any character. Obsidian resolves both forms and draws both in
+/// its graph, so the only cost is that the source reads less prettily exactly
+/// where a wikilink would not have worked at all.
+fn link(project: &str, id: &str) -> String {
+    let target = qualified(project, id);
+    if target.contains(['[', ']', '#', '|', '^']) {
+        let name = target.rsplit('/').next().unwrap_or(&target).to_string();
+        return format!("[{name}](<{target}.md>)");
+    }
+    format!("[[{target}]]")
+}
+
 fn kind_of(kind: NodeKind) -> &'static str {
     match kind {
         NodeKind::Source => "source",
@@ -392,7 +413,7 @@ pub fn obsidian(workspace: &Workspace) -> Vec<Note> {
         }
         let _ = writeln!(index, "\n## Most depended upon — `{}`\n", project.id);
         for (count, id) in hubs {
-            let _ = writeln!(index, "- {count} — [[{}]]", qualified(&project.id, id));
+            let _ = writeln!(index, "- {count} — {}", link(&project.id, id));
         }
     }
     notes.push(Note {
@@ -458,14 +479,14 @@ pub fn obsidian(workspace: &Workspace) -> Vec<Note> {
             if let Some(targets) = in_edges {
                 let _ = writeln!(body, "## Imported by ({})\n", targets.len());
                 for target in targets {
-                    let _ = writeln!(body, "- [[{}]]", qualified(&project.id, target));
+                    let _ = writeln!(body, "- {}", link(&project.id, target));
                 }
                 body.push('\n');
             }
             if let Some(targets) = out_edges {
                 let _ = writeln!(body, "## Imports ({})\n", targets.len());
                 for target in targets {
-                    let _ = writeln!(body, "- [[{}]]", qualified(&project.id, target));
+                    let _ = writeln!(body, "- {}", link(&project.id, target));
                 }
                 body.push('\n');
             }
@@ -678,6 +699,48 @@ mod tests {
                 "line {} is indented, which Markdown reads as a code block: {line:?}",
                 number + 1
             );
+        }
+    }
+
+    /// Found on a real workspace: Next.js routes put `[id]` and `[...all]`
+    /// into paths, and a `[` inside a wikilink kills it. Forty-six links were
+    /// dead — forty-six edges missing from Obsidian's graph, silently.
+    #[test]
+    fn a_path_a_wikilink_cannot_carry_becomes_a_markdown_link() {
+        assert_eq!(link(".", "src/lib.ts"), "[[src/lib.ts]]");
+        assert_eq!(link("web", "src/lib.ts"), "[[web/src/lib.ts]]");
+        assert_eq!(
+            link(".", "app/(auth)/contracts/[id]/page.tsx"),
+            "[page.tsx](<app/(auth)/contracts/[id]/page.tsx.md>)"
+        );
+        assert_eq!(
+            link(".", "app/api/[...all]/route.ts"),
+            "[route.ts](<app/api/[...all]/route.ts.md>)"
+        );
+    }
+
+    /// The whole vault, checked the way the bug was found: no wikilink may
+    /// contain a character that closes it early.
+    #[test]
+    fn no_wikilink_in_a_vault_is_broken_by_its_own_path() {
+        let dir = TempDir::new().unwrap();
+        write_file(&dir, "package.json", r#"{"name":"app"}"#);
+        write_file(&dir, "src/app/[id]/page.tsx", "");
+        write_file(&dir, "src/a.ts", "import p from \"./app/[id]/page\";\n");
+        let workspace = scan_workspace(dir.path());
+
+        for note in obsidian(&workspace) {
+            for line in note.body.lines() {
+                if let Some(open) = line.find("[[") {
+                    let inside = &line[open + 2..];
+                    let close = inside.find("]]").unwrap_or(inside.len());
+                    assert!(
+                        !inside[..close].contains(['[', ']', '#', '|', '^']),
+                        "{} holds a wikilink Obsidian cannot follow: {line}",
+                        note.path
+                    );
+                }
+            }
         }
     }
 

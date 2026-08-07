@@ -221,7 +221,7 @@ const EDGE_INK: Record<Theme, string> = {
 };
 
 /** Straight RGB blend, `weight` of `hex` over `onto`. */
-function mix(hex: string, onto: string, weight: number): string {
+export function mix(hex: string, onto: string, weight: number): string {
   const from = Number.parseInt(hex.slice(1), 16);
   const to = Number.parseInt(onto.slice(1), 16);
   const channel = (shift: number) => {

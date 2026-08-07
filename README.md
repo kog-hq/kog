@@ -100,6 +100,59 @@ anything, so `kog` over SSH still tells you where to look.
 
 <br />
 
+# Ask it
+
+The graph knows which files import `packages/prisma/index.ts`. Ask it rather than grep:
+
+```bash
+$ kog query "what depends on packages/prisma/index.ts" --root documenso --limit 3
+packages/prisma/index.ts (typescript)
+484 dependents
+  apps/openpage-api/lib/growth/get-monthly-completed-document.ts
+  apps/openpage-api/lib/growth/get-signer-conversion.ts
+  apps/openpage-api/lib/growth/get-user-monthly-growth.ts
+  … 481 more not shown (raise `limit`)
+```
+
+That is the number the section above says grep answers `0` to. Reproduce both against the
+pinned commit in [`docs/measurements/`](docs/measurements/).
+
+```bash
+kog query "what does apps/web/src/app.tsx depend on"
+kog query "blast radius of packages/lib/utils/teams.ts" --depth 2
+kog query "files touching react"
+kog query "summary"
+```
+
+Every list reports its **exact** total and says what it left out, so a capped answer can
+never be mistaken for a complete one. A path that names nothing, or names three files, is
+told to you rather than guessed at.
+
+### <img src="./assets/icons/code.svg" width="14" height="14"/> From an agent
+
+The same five questions are an MCP server over stdio — `scan_summary`, `what_depends_on`,
+`what_does_x_depend_on`, `blast_radius`, `files_touching_package`:
+
+```bash
+claude mcp add kog -- kog mcp /path/to/your-project
+```
+
+Or, for any client that reads a JSON config:
+
+```json
+{ "mcpServers": { "kog": { "command": "kog", "args": ["mcp", "/path/to/your-project"] } } }
+```
+
+It scans once at startup and answers from memory. Structure, not file contents — so
+*"what depends on this?"* costs tens of tokens where reading the 484 files would cost
+hundreds of thousands and fit in no context window at all.
+
+The CLI and the MCP server are the same code: one `Atlas`, one set of answers, one
+rendering. Two implementations would eventually disagree, and only one of them would be
+measured.
+
+<br />
+
 # Two numbers, and how to check them
 
 A resolution rate answers *of the imports I read, how many resolved?* It says nothing
@@ -178,6 +231,12 @@ Stated plainly, because a tool that only advertises its strengths is not measuri
   directory. That is what a file-level graph of Go means, not a bug.
 - **The renderer is a prototype.** It proves 2,800 nodes render and stay interactive. It
   is not an interface.
+- **`files touching X` means an *external* package.** A workspace package or a path alias
+  resolves to a file, so `@documenso/prisma` answers zero there while 484 files import it.
+  The answer says which index it searched and points at the query that does work, rather
+  than reporting a zero that reads like a fact about the repository.
+- **A scan is a snapshot.** `kog mcp` reads the tree once at startup; edits after that are
+  invisible until it is restarted.
 - **Two repositories is not a corpus.** The rates above are two data points.
 
 # Stack
@@ -192,9 +251,9 @@ built with Vite and embedded in the binary at compile time.
 
 # Project status
 
-v0.1 is complete and measured. [`ROADMAP.md`](ROADMAP.md) has the order: more languages,
-then an MCP server so an agent can ask the graph questions instead of grepping, then a
-desktop shell.
+v0.1 and v0.3 are complete and measured: sixteen languages, and an MCP server so an agent
+asks the graph instead of grepping. [`ROADMAP.md`](ROADMAP.md) has what is left — the
+languages the coverage report keeps naming, packaging, then a desktop shell.
 
 Contributions welcome — [`.github/CONTRIBUTING.md`](.github/CONTRIBUTING.md).
 

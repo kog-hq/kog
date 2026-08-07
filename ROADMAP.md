@@ -57,6 +57,9 @@ at 0.9926 with 1.0000. Full evidence: [`docs/measurements/`](docs/measurements/)
 
 ## v0.2 — the languages the coverage report keeps naming
 
+Still open, and deliberately overtaken by v0.3 below: a graph that cannot be asked anything
+is worth less than one that reads two more languages, so the MCP server went first.
+
 The gap list is the roadmap now: whatever the coverage report names most often across real
 repositories is what gets read next. Ordered by what shows up:
 
@@ -71,27 +74,47 @@ A language ships when it passes its own resolution gate, not when its grammar co
 
 ---
 
-## v0.3 — MCP server
+## v0.3 — MCP server — shipped
 
-The point at which KOG becomes useful to an agent rather than only to a person.
+The point at which KOG became useful to an agent rather than only to a person.
 
-An agent asking *"what depends on this file?"* today greps, and grep answers with text
-matches. On [`documenso`](https://github.com/documenso/documenso),
-`packages/prisma/index.ts` is the most-depended-upon file in the graph — **484** real
-dependents, resolved through the `@documenso/prisma` workspace-package alias. Grepping the
-repository for that file's own path finds **0** matches: every one of those 484 imports
-goes through the alias, and grep cannot connect an alias to the file it names. The agent
-concludes the file is unused, and is wrong by all 484.
+An agent asking *"what depends on this file?"* greps, and grep answers with text matches.
+On [`documenso`](https://github.com/documenso/documenso), `packages/prisma/index.ts` is the
+most-depended-upon file in the graph — **484** real dependents, resolved through the
+`@documenso/prisma` workspace-package alias. Grepping the repository for that file's own
+path finds **0** matches: every one of those 484 imports goes through the alias, and grep
+cannot connect an alias to the file it names. The agent concludes the file is unused, and
+is wrong by all 484.
 
-The graph already knows. It just has no way to be asked. Planned queries:
+The graph already knew. It had no way to be asked. Now it does, five ways:
 
-- what depends on `X`
-- what does `X` depend on
-- blast radius of changing `X`
-- which files touch package `Y`
+- `scan_summary` — the two numbers, the rate per language, the coverage gaps, and the
+  files everything else points at
+- `what_depends_on` — the 484
+- `what_does_x_depend_on`
+- `blast_radius` — transitive dependents to a depth, counted per hop
+- `files_touching_package`
 
 Structure, not file contents — so an answer costs tens of tokens where reading the files
 would cost hundreds of thousands, and fit in no context window at all.
+
+Two design rules carried over from the scan, because an answer is a published number too:
+
+- **A list never caps its total.** It names at most `limit` files and reports exactly how
+  many it held back. A blast radius stopped by its depth limit says so, so the number it
+  gives reads as the floor it is.
+- **A path is never guessed at.** One that names nothing returns the near names; one that
+  names three files returns the three. Quietly picking one would make a wrong answer look
+  like a right one.
+
+`kog query "what depends on X"` runs the same code from a terminal — the same `Atlas`, the
+same answers, the same rendering. Two implementations would drift, and only one of them
+would be measured.
+
+The transport is newline-delimited JSON-RPC 2.0 written against the specification, with no
+new dependency and no async runtime. It answers both MCP eras: `server/discover` with
+per-request `_meta` for `2026-07-28`, and the `initialize` handshake for `2025-11-25` and
+earlier, which is what most clients still speak.
 
 ---
 

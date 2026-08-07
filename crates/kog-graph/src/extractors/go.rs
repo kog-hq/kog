@@ -34,17 +34,19 @@ struct Module {
 }
 
 pub struct GoExtractor {
-    /// Sorted by descending module-path length, so the most specific module
-    /// wins in a multi-module repository: given `example.com/m` and
-    /// `example.com/m/tools`, an import of `example.com/m/tools/x` must
-    /// resolve against the nested module, not the outer one.
+    /// Every `go.mod` in the scanned tree, in the order the walker found
+    /// them. Which one resolves a given import is decided per import, from
+    /// the importing file's own position — see [`GoExtractor::resolve`].
+    /// Ordering them here cannot work: two `go.mod` files may declare the
+    /// same module path, and nothing about the pair alone says which one a
+    /// particular file belongs to.
     modules: Vec<Module>,
 }
 
 impl GoExtractor {
     pub fn new(root: &Path) -> Self {
         let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
-        let mut modules: Vec<Module> = crate::discover::survey(&root)
+        let modules: Vec<Module> = crate::discover::survey(&root)
             .files
             .iter()
             .filter(|p| p.file_name().is_some_and(|n| n == "go.mod"))
@@ -54,7 +56,6 @@ impl GoExtractor {
                 Some(Module { path, dir })
             })
             .collect();
-        modules.sort_by(|a, b| b.path.len().cmp(&a.path.len()).then(a.path.cmp(&b.path)));
         Self { modules }
     }
 
@@ -96,8 +97,35 @@ impl Extractor for GoExtractor {
         )?))
     }
 
-    fn resolve(&self, raw: &str, _importer: &Path) -> Resolution {
-        for module in &self.modules {
+    fn resolve(&self, raw: &str, importer: &Path) -> Resolution {
+        // A Go file belongs to the module of the nearest enclosing `go.mod`,
+        // so that one is tried first, and every other matching module after
+        // it.
+        //
+        // Both halves of that are load-bearing, and neither was there before.
+        // Two `go.mod` files can declare the *same* module path: `cli/cli`
+        // ships a CodeQL test fixture whose `go.mod` repeats the
+        // repository's own `module github.com/cli/cli/v2`. The old code
+        // ordered modules by path length — a tie here — and returned on the
+        // first one whose prefix matched, so every self-import in the
+        // repository was resolved against a fixture directory that holds
+        // none of them. Fail-closed then turned each one into `Unresolved`
+        // with no second chance: 2,995 of 3,427 internal specifiers, a
+        // published Go rate of 0.1261, on a repository where the imports are
+        // all perfectly ordinary.
+        let mut candidates: Vec<&Module> = self.modules.iter().collect();
+        candidates.sort_by_key(|module| {
+            (
+                // Enclosing modules first…
+                !importer.starts_with(&module.dir),
+                // …deepest first among them, which is Go's "nearest
+                // `go.mod` wins" rule.
+                std::cmp::Reverse(module.dir.components().count()),
+            )
+        });
+
+        let mut named_this_repository = false;
+        for module in candidates {
             let rest = if raw == module.path {
                 Some("")
             } else {
@@ -107,21 +135,24 @@ impl Extractor for GoExtractor {
             let Some(rest) = rest else {
                 continue;
             };
+            named_this_repository = true;
 
-            // The module prefix matched, so the author named a package in
-            // this repository: from here a miss is Unresolved, never a
-            // fall-through to External. Same fail-closed shape as a
-            // TypeScript alias.
             let package_dir = support::normalise(&module.dir.join(rest));
             if !support::contained(&module.dir, &package_dir) {
-                return Resolution::Unresolved;
+                continue;
             }
             let files = support::files_in_dir(&package_dir, EXTENSIONS);
-            return if files.is_empty() {
-                Resolution::Unresolved
-            } else {
-                Resolution::InternalSet(files)
-            };
+            if !files.is_empty() {
+                return Resolution::InternalSet(files);
+            }
+        }
+
+        if named_this_repository {
+            // A module prefix matched somewhere and no module held the
+            // package: the author named a package in this repository that is
+            // not here. Unresolved, never a fall-through to External — the
+            // same fail-closed shape as a TypeScript alias.
+            return Resolution::Unresolved;
         }
 
         // Everything else is the standard library or a dependency. The
@@ -149,6 +180,87 @@ mod tests {
         let path = root(dir).join(rel);
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, body).unwrap();
+    }
+
+    /// Found by measuring [`cli/cli`](https://github.com/cli/cli), which
+    /// ships a CodeQL test fixture whose `go.mod` repeats the repository's
+    /// own `module` line verbatim. Two modules then declare the same path,
+    /// the old ordering (by path length) could not tell them apart, and the
+    /// resolver returned on whichever it saw first — sending every
+    /// self-import in the repository to a fixture directory that holds none
+    /// of them. Fail-closed did the rest: 2,995 of 3,427 internal specifiers
+    /// unresolved, and a published Go rate of 0.1261 on a repository whose
+    /// imports are entirely ordinary.
+    #[test]
+    fn a_duplicate_module_path_elsewhere_does_not_hide_the_real_one() {
+        let dir = TempDir::new().unwrap();
+        // The fixture, buried deep, declaring the same module path.
+        write(
+            &dir,
+            ".github/codeql/tests/fixture/go.mod",
+            "module example.com/app\n",
+        );
+        write(
+            &dir,
+            ".github/codeql/tests/fixture/main.go",
+            "package main\n",
+        );
+        // The real module, at the root.
+        write(&dir, "go.mod", "module example.com/app\n");
+        write(&dir, "internal/store/store.go", "package store\n");
+        write(&dir, "main.go", "package main\n");
+
+        let e = GoExtractor::new(dir.path());
+        let resolution = e.resolve(
+            "example.com/app/internal/store",
+            &root(&dir).join("main.go"),
+        );
+
+        assert!(
+            matches!(resolution, Resolution::InternalSet(ref files)
+                     if files.len() == 1 && files[0].ends_with("internal/store/store.go")),
+            "the importing file's own module must win, got {resolution:?}"
+        );
+    }
+
+    /// The other half of the same rule: a file *inside* the nested module
+    /// resolves against that one, because Go's rule is the nearest enclosing
+    /// `go.mod` and not the outermost.
+    #[test]
+    fn a_file_inside_a_nested_module_resolves_against_that_module() {
+        let dir = TempDir::new().unwrap();
+        write(&dir, "go.mod", "module example.com/outer\n");
+        write(&dir, "shared/shared.go", "package shared\n");
+        write(&dir, "tools/go.mod", "module example.com/inner\n");
+        write(&dir, "tools/lib/lib.go", "package lib\n");
+        write(&dir, "tools/main.go", "package main\n");
+
+        let e = GoExtractor::new(dir.path());
+        let resolution = e.resolve("example.com/inner/lib", &root(&dir).join("tools/main.go"));
+
+        assert!(
+            matches!(resolution, Resolution::InternalSet(ref files)
+                     if files.len() == 1 && files[0].ends_with("tools/lib/lib.go")),
+            "got {resolution:?}"
+        );
+    }
+
+    /// A package named in this repository that genuinely is not here stays
+    /// `Unresolved` — trying every module must not become a fall-through to
+    /// `External`, which would let a broken import hide as a dependency.
+    #[test]
+    fn a_self_module_import_that_names_nothing_is_still_unresolved() {
+        let dir = TempDir::new().unwrap();
+        write(&dir, "go.mod", "module example.com/app\n");
+        write(&dir, "main.go", "package main\n");
+
+        let e = GoExtractor::new(dir.path());
+        let resolution = e.resolve(
+            "example.com/app/internal/ghost",
+            &root(&dir).join("main.go"),
+        );
+
+        assert_eq!(resolution, Resolution::Unresolved);
     }
 
     #[test]

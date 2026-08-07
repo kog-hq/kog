@@ -21,6 +21,23 @@ import type { KogProject, ProjectIndex } from "@/lib/kog";
 export type LabelMode = "none" | "hubs" | "more" | "all";
 
 /**
+ * How many edges are drawn.
+ *
+ * `linked` is the default and the interesting one: an edge with *both* ends
+ * off screen is a line crossing the view that connects nothing you can see.
+ * Zoomed into one cluster of a 3,000-edge graph those are most of the ink,
+ * and the answer to "what is here" cannot include relationships between two
+ * elsewheres. Zoomed out everything is in frame, so nothing is culled and the
+ * graph is never quietly reduced.
+ *
+ * It is a control rather than a rule because the trade is real: a hub with a
+ * hundred dependents spread across the graph genuinely has a hundred edges,
+ * and whether you want to see them leaving is a question about what you are
+ * reading for, not one this file can answer.
+ */
+export type EdgeMode = "none" | "linked" | "all";
+
+/**
  * How many names are on screen at once. Sigma decides by drawn size, so the
  * threshold is what separates "the five hubs" from "everything".
  */
@@ -74,6 +91,7 @@ export type CanvasState = {
   /** Anything the pointer is deliberately on, in a side panel. */
   hovered: string | null;
   labelMode: LabelMode;
+  edgeMode: EdgeMode;
   groupByFolder: boolean;
   colourBy: ColourBy;
   theme: Theme;
@@ -132,6 +150,34 @@ function hoverDrawer(theme: CanvasTheme) {
   return labelDrawer(theme, true);
 }
 
+/**
+ * A box in graph coordinates, or `null` when nothing should be culled.
+ */
+type Box = { minX: number; minY: number; maxX: number; maxY: number } | null;
+
+/**
+ * The part of the graph currently on screen, in graph coordinates.
+ *
+ * Grown by a margin so an edge whose far end sits just past the frame still
+ * draws, and the picture does not visibly change as you nudge the camera.
+ */
+function viewportOf(renderer: Sigma): Box {
+  const { width, height } = renderer.getDimensions();
+  const topLeft = renderer.viewportToGraph({ x: 0, y: 0 });
+  const bottomRight = renderer.viewportToGraph({ x: width, y: height });
+  const minX = Math.min(topLeft.x, bottomRight.x);
+  const maxX = Math.max(topLeft.x, bottomRight.x);
+  const minY = Math.min(topLeft.y, bottomRight.y);
+  const maxY = Math.max(topLeft.y, bottomRight.y);
+  const margin = Math.max(maxX - minX, maxY - minY) * 0.25;
+  return {
+    minX: minX - margin,
+    minY: minY - margin,
+    maxX: maxX + margin,
+    maxY: maxY + margin,
+  };
+}
+
 /** The smallest box holding every point, without spreading into `Math.max`. */
 function extent(points: { x: number; y: number }[]) {
   let minX = Infinity;
@@ -156,6 +202,7 @@ export function GraphCanvas(props: Props) {
     selected,
     hovered,
     labelMode,
+    edgeMode,
     groupByFolder,
     colourBy,
     theme,
@@ -164,6 +211,9 @@ export function GraphCanvas(props: Props) {
 
   const container = useRef<HTMLDivElement>(null);
   const sigma = useRef<Sigma | null>(null);
+  // Read by the edge reducer on every repaint, written when the camera
+  // settles. A ref rather than state: it must not re-render React.
+  const onScreen = useRef<Box>(null);
 
   // The layout is the expensive part, so it is tied to what actually changes
   // its shape: the project and whether folders are collapsed. Filters,
@@ -266,7 +316,24 @@ export function GraphCanvas(props: Props) {
     renderer.on("clickNode", ({ node }) => onSelect(node));
     renderer.on("clickStage", () => onSelect(null));
 
+    // Recompute what is on screen once the camera settles, and repaint.
+    //
+    // Debounced rather than per-frame: the edge set only has to be right when
+    // someone is looking at it, and re-running the reducers over 2,800 nodes
+    // on every frame of a drag would cost far more than it buys.
+    let settle: number | undefined;
+    const onCamera = () => {
+      window.clearTimeout(settle);
+      settle = window.setTimeout(() => {
+        onScreen.current = viewportOf(renderer);
+        renderer.refresh({ skipIndexation: true });
+      }, 90);
+    };
+    renderer.getCamera().on("updated", onCamera);
+    onScreen.current = viewportOf(renderer);
+
     return () => {
+      window.clearTimeout(settle);
       renderer.kill();
       sigma.current = null;
     };
@@ -339,9 +406,22 @@ export function GraphCanvas(props: Props) {
       return { ...data, color: fill };
     });
 
+    /** Whether a node sits inside the part of the graph on screen. */
+    const inFrame = (node: string): boolean => {
+      const box = onScreen.current;
+      if (!box) return true;
+      const x = graph.getNodeAttribute(node, "x") as number;
+      const y = graph.getNodeAttribute(node, "y") as number;
+      return x >= box.minX && x <= box.maxX && y >= box.minY && y <= box.maxY;
+    };
+
     renderer.setSetting("edgeReducer", (edge, data) => {
       const [source, target] = graph.extremities(edge);
       if (visible && (!visible.has(source) || !visible.has(target))) {
+        return { ...data, hidden: true };
+      }
+      if (edgeMode === "none") return { ...data, hidden: true };
+      if (edgeMode === "linked" && !inFrame(source) && !inFrame(target)) {
         return { ...data, hidden: true };
       }
       if (focus) {
@@ -375,7 +455,7 @@ export function GraphCanvas(props: Props) {
     renderer.setSetting("defaultDrawNodeHover", hoverDrawer(canvas));
     renderer.setSetting("defaultEdgeColor", ink.color);
     renderer.refresh();
-  }, [graph, index, visible, selected, focus, colourBy, theme]);
+  }, [graph, index, visible, selected, focus, colourBy, edgeMode, theme]);
 
   useEffect(() => {
     const renderer = sigma.current;

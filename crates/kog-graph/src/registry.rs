@@ -8,8 +8,8 @@
 use crate::extractor::Extractor;
 use crate::extractors::{
     CLikeExtractor, CSharpExtractor, CssExtractor, GoExtractor, HtmlExtractor, JavaExtractor,
-    PhpExtractor, PythonExtractor, RubyExtractor, RustExtractor, SfcExtractor, ShellExtractor,
-    TypeScriptExtractor,
+    MdxExtractor, PhpExtractor, PythonExtractor, RubyExtractor, RustExtractor, SfcExtractor,
+    ShellExtractor, TypeScriptExtractor,
 };
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -79,6 +79,8 @@ impl Registry {
             // a `.js` specifier so often names a `.ts` file on disk.
             Box::new(Arc::clone(&typescript)),
             Box::new(SfcExtractor::new(Arc::clone(&typescript))),
+            // MDX is ESM inside prose, resolved by the same front end.
+            Box::new(MdxExtractor::new(Arc::clone(&typescript))),
             Box::new(GoExtractor::new(root)),
             Box::new(PythonExtractor::new(root)),
             Box::new(RustExtractor::new(root)),

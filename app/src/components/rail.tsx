@@ -8,7 +8,7 @@ import {
 } from "@/components/ui/popover";
 import { CoverageMeter } from "@/components/meter";
 import { GapsPanel, type Filters } from "@/components/panels";
-import type { LabelMode } from "@/graph/graph-canvas";
+import type { EdgeMode, LabelMode } from "@/graph/graph-canvas";
 import type { ColourBy } from "@/graph/build";
 import type { Communities } from "@/graph/communities";
 import type {
@@ -173,6 +173,7 @@ function Check({
 }
 
 const LABEL_MODES = ["none", "hubs", "more", "all"] as const;
+const EDGE_MODES = ["none", "linked", "all"] as const;
 const COLOUR_MODES = ["community", "language"] as const;
 
 /**
@@ -199,6 +200,8 @@ export function Rail({
   onGroupByFolder,
   labelMode,
   onLabelMode,
+  edgeMode,
+  onEdgeMode,
   theme,
   onTheme,
   onSelect,
@@ -220,6 +223,8 @@ export function Rail({
   onGroupByFolder: (value: boolean) => void;
   labelMode: LabelMode;
   onLabelMode: (mode: LabelMode) => void;
+  edgeMode: EdgeMode;
+  onEdgeMode: (mode: EdgeMode) => void;
   theme: Theme;
   onTheme: () => void;
   onSelect: (id: string) => void;
@@ -338,6 +343,22 @@ export function Rail({
             options={LABEL_MODES}
             onChange={onLabelMode}
           />
+        </Section>
+
+        <Section title="Edges">
+          <Segmented
+            label="How many edges"
+            value={edgeMode}
+            options={EDGE_MODES}
+            onChange={onEdgeMode}
+          />
+          <p className="mt-2 px-0.5 text-[11px] leading-relaxed text-muted-foreground">
+            {edgeMode === "linked"
+              ? "Only edges touching a file on screen. Zoom out to see them all."
+              : edgeMode === "all"
+                ? "Every edge, including those crossing the view between two files you cannot see."
+                : "No edges. Position and colour still carry the structure."}
+          </p>
         </Section>
 
         <Section title="Show">

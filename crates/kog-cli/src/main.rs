@@ -1,8 +1,12 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use clap::{Parser, Subcommand};
-use kog_graph::{scan_workspace, FileStatus, Project, Workspace};
+use kog_graph::{
+    render, scan_workspace, Answer, Atlas, FileStatus, Project, Question, Workspace, DEFAULT_LIMIT,
+    QUESTION_FORMS,
+};
 use std::path::PathBuf;
 
+mod mcp;
 mod server;
 
 #[derive(Parser)]
@@ -38,6 +42,38 @@ enum Command {
         #[arg(default_value = ".")]
         root: PathBuf,
     },
+    /// Ask the graph a question, in words.
+    ///
+    /// Shares its entire implementation with the MCP server: two
+    /// implementations of "what depends on this?" would eventually disagree,
+    /// and only one of them would be measured.
+    Query {
+        /// The question. One of:
+        /// "what depends on <path>", "what does <path> depend on",
+        /// "blast radius of <path>", "files touching <package>", "summary".
+        question: String,
+        /// Project root to scan. Defaults to the current directory.
+        #[arg(long, default_value = ".")]
+        root: PathBuf,
+        /// How many file names to list. The total is always reported in full.
+        #[arg(long)]
+        limit: Option<usize>,
+        /// How many hops a blast radius walks.
+        #[arg(long)]
+        depth: Option<usize>,
+        /// Print the answer as JSON instead of prose.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Serve the graph to an agent over MCP, on stdin and stdout.
+    ///
+    /// Scans once at startup, then answers until the stream closes. Progress
+    /// goes to stderr; stdout carries protocol messages and nothing else.
+    Mcp {
+        /// Project root to scan. Defaults to the current directory.
+        #[arg(default_value = ".")]
+        root: PathBuf,
+    },
 }
 
 fn main() -> Result<()> {
@@ -51,6 +87,14 @@ fn main() -> Result<()> {
     match command {
         Command::Scan { root, output } => scan(root, output),
         Command::View { root } => view(root),
+        Command::Query {
+            question,
+            root,
+            limit,
+            depth,
+            json,
+        } => query(root, &question, limit, depth, json),
+        Command::Mcp { root } => mcp::serve(&canonicalize_root(root)?),
     }
 }
 
@@ -260,6 +304,57 @@ fn view(root: PathBuf) -> Result<()> {
         }
     }
 
+    Ok(())
+}
+
+/// Scan `root` and answer one question about it.
+///
+/// Every step after parsing the phrase is the MCP server's code, unchanged:
+/// the same `Atlas`, the same `Answer`, the same rendering. A second
+/// implementation here would drift, and the terminal would start disagreeing
+/// with the agent about the same repository.
+fn query(
+    root: PathBuf,
+    question: &str,
+    limit: Option<usize>,
+    depth: Option<usize>,
+    json: bool,
+) -> Result<()> {
+    let root = canonicalize_root(root)?;
+    let mut question = Question::parse(question).map_err(|_| {
+        let forms = QUESTION_FORMS
+            .iter()
+            .map(|form| format!("  {form}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        anyhow!("cannot answer {question:?}. Ask one of:\n{forms}")
+    })?;
+
+    match (&mut question, depth) {
+        (Question::BlastRadius { depth: walk, .. }, Some(requested)) => *walk = requested,
+        // Silently ignoring a flag the user typed would leave them believing
+        // it applied. Say so, and answer the question they asked anyway.
+        (_, Some(_)) => eprintln!("note: --depth only applies to a blast radius; ignoring it"),
+        (_, None) => {}
+    }
+
+    let atlas = Atlas::scan(&root);
+    let answer = atlas.answer(&question, limit.unwrap_or(DEFAULT_LIMIT));
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&answer)?);
+    } else {
+        print!("{}", render(&answer));
+    }
+
+    // A path that named nothing is a real failure for anything scripting
+    // this, even though the printed answer is the useful one. Exit non-zero
+    // after printing it, rather than instead of printing it.
+    if matches!(answer, Answer::Unlocated { .. }) {
+        use std::io::Write;
+        std::io::stdout().flush().ok();
+        std::process::exit(1);
+    }
     Ok(())
 }
 
@@ -480,5 +575,108 @@ mod tests {
                 output: Some(PathBuf::from("g.json")),
             })
         );
+    }
+
+    /// The question is positional and the root is a flag, so the shortest
+    /// useful invocation is `kog query "what depends on X"` in the directory
+    /// you are already standing in.
+    #[test]
+    fn query_takes_the_question_first_and_defaults_the_root() {
+        let cli = Cli::try_parse_from(["kog", "query", "what depends on src/a.ts"]).unwrap();
+        assert_eq!(
+            cli.command,
+            Some(Command::Query {
+                question: "what depends on src/a.ts".to_string(),
+                root: PathBuf::from("."),
+                limit: None,
+                depth: None,
+                json: false,
+            })
+        );
+    }
+
+    #[test]
+    fn query_accepts_a_root_a_limit_a_depth_and_json() {
+        let cli = Cli::try_parse_from([
+            "kog",
+            "query",
+            "blast radius of src/a.ts",
+            "--root",
+            "some/dir",
+            "--limit",
+            "5",
+            "--depth",
+            "2",
+            "--json",
+        ])
+        .unwrap();
+        assert_eq!(
+            cli.command,
+            Some(Command::Query {
+                question: "blast radius of src/a.ts".to_string(),
+                root: PathBuf::from("some/dir"),
+                limit: Some(5),
+                depth: Some(2),
+                json: true,
+            })
+        );
+    }
+
+    #[test]
+    fn mcp_root_defaults_to_the_current_directory() {
+        let cli = Cli::try_parse_from(["kog", "mcp"]).unwrap();
+        assert_eq!(
+            cli.command,
+            Some(Command::Mcp {
+                root: PathBuf::from("."),
+            })
+        );
+    }
+
+    /// A phrase the parser does not recognise must not be answered with
+    /// something else. The error names every form that would have worked, so
+    /// the next attempt succeeds.
+    #[test]
+    fn an_unreadable_question_names_the_forms_that_would_have_worked() {
+        let dir = TempDir::new().unwrap();
+        let err = query(dir.path().to_path_buf(), "do the thing", None, None, false).unwrap_err();
+
+        let message = err.to_string();
+        for form in QUESTION_FORMS {
+            assert!(
+                message.contains(form),
+                "the error should list {form:?}, got {message:?}"
+            );
+        }
+    }
+
+    /// `query` reaches the same `Answer` the MCP server does — asserted
+    /// through the JSON output, which is that answer verbatim.
+    #[test]
+    fn query_answers_from_a_real_scan() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path().join("project");
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::write(root.join("src/lib.ts"), "export const x = 1;").unwrap();
+        fs::write(root.join("src/a.ts"), r#"import { x } from "./lib";"#).unwrap();
+
+        query(
+            root.clone(),
+            "what depends on src/lib.ts",
+            None,
+            None,
+            false,
+        )
+        .expect("a well-formed question about a real file must be answered");
+    }
+
+    #[test]
+    fn a_query_against_an_unreadable_root_fails_the_same_way_a_scan_does() {
+        let dir = TempDir::new().unwrap();
+        let missing = dir.path().join("does-not-exist");
+
+        let err = query(missing.clone(), "summary", None, None, false).unwrap_err();
+
+        assert!(err.to_string().contains("not a readable directory"));
     }
 }

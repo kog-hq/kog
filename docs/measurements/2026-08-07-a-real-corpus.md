@@ -56,14 +56,14 @@ document required looking at a filesystem by hand.
 | Repository | Files seen | Analysed | Not read | Source coverage | Resolution rate |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | withastro/docs | 2,941 | 2,701 | 0 | **1.0000** | **0.9975** |
-| cli/cli | 1,338 | 927 | 7 | **0.9925** | **1.0000** |
+| cli/cli | 1,338 | 927 | 8 | **0.9914** | **1.0000** |
 | pallets/flask | 236 | 106 | 4 | **0.9636** | **0.9970** |
 | BurntSushi/ripgrep | 236 | 114 | 2 | **0.9828** | **0.9734** |
 | google/gson | 314 | 264 | 4 | **0.9851** | **1.0000** |
 | slimphp/Slim | 145 | 125 | 0 | **1.0000** | **0.9807** |
-| sinatra/sinatra | 292 | 155 | 6 | **0.9627** | **1.0000** |
+| sinatra/sinatra | 292 | 155 | 76 | **0.6710** | **1.0000** |
 | fmtlib/fmt | 142 | 79 | 5 | **0.9405** | **0.8571** |
-| curl/curl | 4,437 | 1,097 | 108 | **0.9104** | **0.9705** |
+| curl/curl | 4,437 | 1,097 | 152 | **0.8783** | **0.9705** |
 | JamesNK/Newtonsoft.Json | 988 | 945 | 0 | **1.0000** | **1.0000** |
 | documenso/documenso | 2,833 | 2,243 | 164 | **0.9319** | **0.9779** |
 
@@ -202,6 +202,42 @@ using psql `\i`/`\ir` includes, or dbt's `{{ ref('model') }}`, has real
 cross-file references and would deserve an extractor. Prisma migrations do not.
 
 ---
+
+## What auditing *every extension* found: coverage was overstated
+
+The corpus above was chosen one repository per *language KOG already
+supports*. That is still too narrow a question. The coverage report classifies
+every extension it meets — `.json`, `.md`, `.yaml`, `.png` and the rest — and
+that classification had never been audited against anything.
+
+Auditing it across all eleven repositories found source code filed as **not
+source**, which is not a cosmetic mistake: `not_source` leaves the coverage
+denominator entirely. Documentation and images leave it for a good reason — a
+repository is not worse mapped for containing a README. But an extension KOG
+has simply never heard of defaulted into the same bucket, so **anything
+unfamiliar silently improved the published number.**
+
+That is the defect this tool exists to catch, pointing the other way.
+
+Ruby template languages were the worst case. A template renders other
+templates, so it carries real cross-file references and is source by any
+reading:
+
+| Repository | Hidden files | Published | Honest |
+| --- | ---: | ---: | ---: |
+| sinatra/sinatra | 68 (`.erb`, `.haml`, `.slim`, `.erubis`, `.hamlit`) | 0.9627 | **0.6710** |
+| curl/curl | 62 (`.m4`, `.am`, `.in`) | 0.9104 | **0.8783** |
+| cli/cli | 1 | 0.9925 | **0.9914** |
+
+Sinatra's published coverage was overstated by **29 points**. Templates and
+build-system source are now catalogued as source, so they count against the
+number instead of vanishing from it, and each is named in the gap list.
+
+Still open from the same audit, and not yet decided: `.inc` (11 files —
+ambiguous between C, PHP and assembler), `.txtar` (143 — Go test archives),
+`.erb`-adjacent formats not seen in this corpus. Extensions genuinely not
+source, such as `.zip`, `.png` and `LICENSE`, are correctly excluded; the
+report names them as unrecognised rather than pretending to know.
 
 ## Still weak, stated plainly
 

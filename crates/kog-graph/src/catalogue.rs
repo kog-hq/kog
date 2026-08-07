@@ -50,6 +50,33 @@ const SOURCE: &[(&str, &str)] = &[
     ("svelte", "Svelte"),
     ("astro", "Astro"),
     ("mdx", "MDX"),
+    // Template languages. Source, and easy to miss: a template renders other
+    // templates, so it holds real cross-file references. Filed as "not
+    // source" they left the coverage denominator entirely, which published
+    // 0.9627 for `sinatra/sinatra` where the honest number is 0.6769 — the
+    // unrecognised always flattering the figure is the same defect this tool
+    // exists to catch, pointing the other way.
+    ("erb", "ERB"),
+    ("rhtml", "ERB"),
+    ("erubis", "Erubis"),
+    ("haml", "Haml"),
+    ("hamlit", "Hamlit"),
+    ("slim", "Slim"),
+    ("liquid", "Liquid"),
+    ("mustache", "Mustache"),
+    ("hbs", "Handlebars"),
+    ("handlebars", "Handlebars"),
+    ("ejs", "EJS"),
+    ("pug", "Pug"),
+    ("jade", "Pug"),
+    ("twig", "Twig"),
+    ("blade.php", "Blade"),
+    ("jinja", "Jinja"),
+    ("jinja2", "Jinja"),
+    ("j2", "Jinja"),
+    ("njk", "Nunjucks"),
+    ("tmpl", "Template"),
+    ("tpl", "Template"),
     ("html", "HTML"),
     ("htm", "HTML"),
     ("xhtml", "HTML"),
@@ -172,6 +199,16 @@ const SOURCE: &[(&str, &str)] = &[
 /// Extensions that are not source code, with the family they belong to.
 /// These never count against coverage: a repository is not worse mapped
 /// for containing a README.
+// Build-system source. `.m4` and `.am` carry real `include` directives, and
+// `.in` is the input a generated file is produced from; treating them as data
+// removed 62 files from `curl`'s coverage denominator.
+const BUILD_SOURCE: &[(&str, &str)] = &[
+    ("m4", "M4"),
+    ("am", "Automake"),
+    ("ac", "Autoconf"),
+    ("mk", "Make"),
+];
+
 const NOT_SOURCE: &[(&str, &str)] = &[
     // Data and configuration
     ("json", "data"),
@@ -295,7 +332,11 @@ pub fn classify(extension: &str, file_name: &str) -> Classification {
     // should not produce two coverage rows for one extension.
     let lower = extension.to_ascii_lowercase();
 
-    if let Some((_, lang)) = SOURCE.iter().find(|(e, _)| *e == lower) {
+    if let Some((_, lang)) = SOURCE
+        .iter()
+        .chain(BUILD_SOURCE.iter())
+        .find(|(e, _)| *e == lower)
+    {
         return Classification {
             kind: Kind::Source,
             lang: Some(lang),
@@ -341,6 +382,43 @@ mod tests {
     fn extensionless_files_are_classified_by_name() {
         assert_eq!(classify("", "Dockerfile").lang, Some("Dockerfile"));
         assert_eq!(classify("", "Makefile").kind, Kind::Source);
+    }
+
+    /// Found by auditing every extension across an eleven-repository corpus,
+    /// rather than only the languages that already had an extractor.
+    ///
+    /// A template renders other templates, so it holds real cross-file
+    /// references and is source by any reading. Filed as "not source" these
+    /// left the coverage denominator altogether, and `sinatra/sinatra`
+    /// published **0.9627** where the honest figure was **0.6769** — 68 files
+    /// of Ruby templates removed from the question rather than counted
+    /// against it. An unrecognised extension always flattering the published
+    /// number is the same defect this tool exists to catch, pointing the
+    /// other way.
+    #[test]
+    fn a_template_is_source_and_counts_against_coverage() {
+        for extension in ["erb", "haml", "slim", "erubis", "hamlit", "hbs", "ejs"] {
+            let classification = classify(extension, &format!("view.{extension}"));
+            assert_eq!(
+                classification.kind,
+                Kind::Source,
+                ".{extension} must count as source, or it leaves the coverage denominator"
+            );
+            assert!(classification.lang.is_some(), ".{extension} must be named");
+        }
+    }
+
+    /// The same for build systems: an `include` in a Makefile fragment or an
+    /// autoconf macro is a real cross-file reference. 62 files on `curl`.
+    #[test]
+    fn build_system_files_are_source_too() {
+        for extension in ["m4", "am", "ac", "mk"] {
+            assert_eq!(
+                classify(extension, &format!("thing.{extension}")).kind,
+                Kind::Source,
+                ".{extension} must count as source"
+            );
+        }
         assert_eq!(classify("", "LICENSE").kind, Kind::NotSource);
         assert_eq!(classify("", "whatever").kind, Kind::Unrecognised);
     }

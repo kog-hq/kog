@@ -180,13 +180,13 @@ does not have a rate, it has a passing unit test. Full evidence, including the c
 | Repository | Language | Files seen | Analysed | Not read | Source coverage | Resolution rate |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
 | [withastro/docs](https://github.com/withastro/docs) | Astro, MDX | 2,941 | 2,701 | 0 | **1.0000** | **0.9975** |
-| [cli/cli](https://github.com/cli/cli) | Go | 1,338 | 927 | 7 | **0.9925** | **1.0000** |
-| [curl/curl](https://github.com/curl/curl) | C | 4,437 | 1,097 | 108 | **0.9104** | **0.9705** |
+| [cli/cli](https://github.com/cli/cli) | Go | 1,338 | 927 | 8 | **0.9914** | **1.0000** |
+| [curl/curl](https://github.com/curl/curl) | C | 4,437 | 1,097 | 152 | **0.8783** | **0.9705** |
 | [JamesNK/Newtonsoft.Json](https://github.com/JamesNK/Newtonsoft.Json) | C# | 988 | 945 | 0 | **1.0000** | **1.0000** |
 | [google/gson](https://github.com/google/gson) | Java | 314 | 264 | 4 | **0.9851** | **1.0000** |
 | [pallets/flask](https://github.com/pallets/flask) | Python | 236 | 106 | 4 | **0.9636** | **0.9970** |
 | [BurntSushi/ripgrep](https://github.com/BurntSushi/ripgrep) | Rust | 236 | 114 | 2 | **0.9828** | **0.9734** |
-| [sinatra/sinatra](https://github.com/sinatra/sinatra) | Ruby | 292 | 155 | 6 | **0.9627** | **1.0000** |
+| [sinatra/sinatra](https://github.com/sinatra/sinatra) | Ruby | 292 | 155 | 76 | **0.6710** | **1.0000** |
 | [slimphp/Slim](https://github.com/slimphp/Slim) | PHP | 145 | 125 | 0 | **1.0000** | **0.9807** |
 | [fmtlib/fmt](https://github.com/fmtlib/fmt) | C++ | 142 | 79 | 5 | **0.9405** | **0.8571** |
 | [documenso/documenso](https://github.com/documenso/documenso) | TypeScript | 2,833 | 2,243 | 164 | **0.9319** | **0.9779** |

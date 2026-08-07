@@ -271,14 +271,18 @@ export function edgeInk(
   edges: number,
   theme: Theme,
 ): { color: string; size: number } {
+  // Fainter than it was at every step. Obsidian's edges sit almost at the
+  // background and the graph reads as nodes with relationships; ours read as
+  // relationships with nodes in them. Weight is how much ink survives the
+  // blend towards the background, so lower is quieter.
   const [weight, size] =
     edges <= 400
-      ? [0.9, 0.45]
+      ? [0.62, 0.4]
       : edges <= 1200
-        ? [0.6, 0.36]
+        ? [0.4, 0.3]
         : edges <= 2500
-          ? [0.4, 0.28]
-          : [0.28, 0.24];
+          ? [0.26, 0.22]
+          : [0.18, 0.18];
   return {
     color: mix(EDGE_INK[theme], CANVAS[theme].background, weight),
     size,

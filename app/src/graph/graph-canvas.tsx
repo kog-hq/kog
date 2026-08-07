@@ -22,6 +22,7 @@ import {
   onSpikeFreeze,
   spikeGrab,
   spikeMove,
+  spikeHot,
   spikeOn,
   spikeRelease,
   startSpike,
@@ -97,10 +98,18 @@ const TRAVEL_MS = 320;
  * every node it crosses; waiting for the pointer to stop means the effect only
  * ever runs when someone is actually looking at something.
  */
-const HOVER_DELAY_MS = 140;
+const HOVER_DELAY_MS = 90;
 
-/** How long the rest of the graph takes to fade back, in milliseconds. */
-const FADE_MS = 180;
+/**
+ * How long the rest of the graph takes to fade back, in milliseconds.
+ *
+ * 180 was too fast to read as a transition at all: after the hover delay it
+ * looked like the graph simply switched states. And since hovering already
+ * runs the fade, a click on the node under the pointer then had nothing left
+ * to animate — which is why clicking appeared to have no transition even
+ * though the code had one.
+ */
+const FADE_MS = 320;
 
 /**
  * How many distinct steps the fade is quantised to.
@@ -496,7 +505,7 @@ export function GraphCanvas(props: Props) {
     // and stopped with it.
     const stopSpike = startSpike(graph);
 
-    const unsubscribe = onSpikeFreeze(() => {
+    const unsubscribe = onSpikeFreeze((first) => {
       // Switching project between the last tick and `end` leaves this handler
       // holding a renderer React has already killed, and refreshing one throws
       // on its own node programs. The freeze callback has to be scoped to the
@@ -504,7 +513,11 @@ export function GraphCanvas(props: Props) {
       if (sigma.current !== renderer) return;
       renderer.refresh();
       onScreen.current = viewportOf(renderer);
-      frame(graph.nodes(), true);
+      // Only the first settle fits the camera. Every drag reheats the solver
+      // and every release settles it again, so framing on each one meant the
+      // view jumped back a step after every single interaction — which is
+      // exactly what "it zooms out by itself" was.
+      if (first) frame(graph.nodes(), true);
     });
 
     return () => {
@@ -647,6 +660,12 @@ export function GraphCanvas(props: Props) {
 
     /** Whether a node sits inside the part of the graph on screen. */
     const inFrame = (node: string): boolean => {
+      // Nothing is culled while the solver is moving nodes. Culling by what is
+      // on screen is correct on a still graph and a strobe on a moving one:
+      // an edge whose end crosses the frame boundary is drawn, dropped, drawn
+      // again on alternate frames, and a few hundred of those flickering at
+      // once is what read as "the lines are not fixed".
+      if (spikeHot()) return true;
       const box = onScreen.current;
       if (!box) return true;
       const x = graph.getNodeAttribute(node, "x") as number;

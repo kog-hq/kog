@@ -102,12 +102,26 @@ a scan that wrote four files because you ran it is a scan you stop running:
 ```bash
 kog scan --graphml g.graphml   # Gephi, yEd, Cytoscape
 kog scan --cypher g.cypher     # cat g.cypher | cypher-shell -u neo4j
+kog scan --yaml g.yaml         # the same record as the JSON
+kog scan --markdown report.md  # the numbers, as a report you can paste into a PR
+kog scan --obsidian vault/     # an Obsidian vault: one wikilinked note per file
 ```
 
-There is no SVG export, deliberately: an SVG needs a layout, the only layout KOG has runs
-in the browser, and a worse one written in Rust would produce a picture that looks
-authoritative and is arbitrary. Both formats above hand the graph to tools whose layouts
-are better than anything that would be written here.
+The **Obsidian vault** is the one you keep rather than look at: a note per file, with
+`[[wikilinks]]` for every import, frontmatter carrying the language, the line count and the
+dependent count, and — on the file that wrote them — every import that did *not* resolve.
+Obsidian draws its own graph from the links, backlinks answer "what depends on this" on
+every note, and search runs over the whole thing.
+
+Everything above is also one click away inside the interface, from the download button
+beside the theme toggle. The page asks the binary for those files rather than rebuilding
+them in TypeScript: one implementation, and it is the one with tests.
+
+The interface exports the **PNG** — the download button beside the theme toggle saves
+exactly what is on screen. The picture comes from the browser because the *layout* does:
+KOG's Rust side deliberately draws nothing, since it would need a second layout, that one
+would be worse, and two layouts drift. For a PDF, print the Markdown report with any
+converter, or print the page from the browser.
 
 The server binds to `127.0.0.1` on an OS-assigned port and prints the URL before opening
 anything, so `kog` over SSH still tells you where to look.

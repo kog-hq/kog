@@ -5,6 +5,7 @@
 //! without opening a socket — see the tests below and the design brief
 //! this module implements.
 
+use kog_graph::Workspace;
 use rust_embed::RustEmbed;
 
 /// `app/dist`, embedded at compile time. `build.rs` fails the build with a
@@ -32,7 +33,7 @@ pub struct RouteResponse {
 /// `index.html`. The graph this server reports must always be the one just
 /// scanned in memory for the current `view` invocation, never a stale
 /// embedded copy.
-pub fn route(path: &str, graph_json: &str) -> RouteResponse {
+pub fn route(path: &str, graph_json: &str, workspace: &Workspace) -> RouteResponse {
     // Requests can carry a query string (e.g. cache-busting); routing only
     // cares about the path.
     let path = path.split('?').next().unwrap_or(path);
@@ -47,6 +48,36 @@ pub fn route(path: &str, graph_json: &str) -> RouteResponse {
             status: 200,
             content_type: "application/json",
             body: graph_json.as_bytes().to_vec(),
+        };
+    }
+
+    // Exports are generated here, by the same code `kog scan --graphml`
+    // calls, rather than rebuilt in TypeScript for the page. A second
+    // implementation would drift, and only one of the two would be tested.
+    // Generated per request: the graph is static for the life of the process,
+    // so holding four serialisations in memory for a download nobody may ask
+    // for is the wrong trade.
+    if let Some(format) = asset_path.strip_prefix("export/") {
+        let (content_type, body) = match format {
+            "graph.graphml" => ("application/xml", kog_graph::graphml(workspace)),
+            "graph.cypher" => ("text/plain; charset=utf-8", kog_graph::cypher(workspace)),
+            "graph.yaml" => ("text/yaml; charset=utf-8", kog_graph::yaml(workspace)),
+            "report.md" => (
+                "text/markdown; charset=utf-8",
+                kog_graph::markdown(workspace),
+            ),
+            _ => {
+                return RouteResponse {
+                    status: 404,
+                    content_type: "text/plain; charset=utf-8",
+                    body: format!("no such export: {format}").into_bytes(),
+                }
+            }
+        };
+        return RouteResponse {
+            status: 200,
+            content_type,
+            body: body.into_bytes(),
         };
     }
 
@@ -91,13 +122,60 @@ pub fn respond(request: tiny_http::Request, decision: RouteResponse) -> std::io:
 
 #[cfg(test)]
 mod tests {
+    use kog_graph::scan_workspace;
+
+    /// A scan of nothing, for the routes that do not care about the graph.
+    fn empty() -> Workspace {
+        scan_workspace(tempfile::TempDir::new().unwrap().path())
+    }
+
+    /// The page downloads its exports from the binary rather than rebuilding
+    /// them in TypeScript: one implementation, and it is the one with tests.
+    #[test]
+    fn an_export_route_is_generated_by_the_same_code_as_the_cli() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join("src")).unwrap();
+        std::fs::write(dir.path().join("package.json"), r#"{"name":"app"}"#).unwrap();
+        std::fs::write(dir.path().join("src/lib.ts"), "export const x = 1;").unwrap();
+        std::fs::write(dir.path().join("src/a.ts"), r#"import { x } from "./lib";"#).unwrap();
+        let workspace = scan_workspace(dir.path());
+
+        for (path, needle, content_type) in [
+            ("/export/graph.graphml", "<graphml", "application/xml"),
+            (
+                "/export/graph.cypher",
+                "MERGE (f:File",
+                "text/plain; charset=utf-8",
+            ),
+            (
+                "/export/graph.yaml",
+                "projects:",
+                "text/yaml; charset=utf-8",
+            ),
+            (
+                "/export/report.md",
+                "# Scan of",
+                "text/markdown; charset=utf-8",
+            ),
+        ] {
+            let response = route(path, "{}", &workspace);
+            assert_eq!(response.status, 200, "{path}");
+            assert_eq!(response.content_type, content_type, "{path}");
+            let body = String::from_utf8(response.body).unwrap();
+            assert!(body.contains(needle), "{path} produced {body:.120}");
+        }
+
+        let missing = route("/export/nope.txt", "{}", &workspace);
+        assert_eq!(missing.status, 404);
+    }
+
     use super::*;
 
     const GRAPH: &str = r#"{"nodes":[],"edges":[],"stats":{}}"#;
 
     #[test]
     fn the_graph_route_returns_the_freshly_scanned_json_body() {
-        let response = route("/graph.json", GRAPH);
+        let response = route("/graph.json", GRAPH, &empty());
         assert_eq!(response.status, 200);
         assert_eq!(response.content_type, "application/json");
         assert_eq!(response.body, GRAPH.as_bytes());
@@ -109,13 +187,13 @@ mod tests {
         // stale copy from `app/public`), the live scan must be what gets
         // served — this is the whole reason `/graph.json` is special-cased
         // ahead of the embedded-asset lookup.
-        let response = route("/graph.json?x=1", GRAPH);
+        let response = route("/graph.json?x=1", GRAPH, &empty());
         assert_eq!(response.body, GRAPH.as_bytes());
     }
 
     #[test]
     fn root_serves_the_embedded_index_html() {
-        let response = route("/", GRAPH);
+        let response = route("/", GRAPH, &empty());
         assert_eq!(response.status, 200);
         assert_eq!(response.content_type, "text/html; charset=utf-8");
         assert!(!response.body.is_empty());
@@ -123,7 +201,7 @@ mod tests {
 
     #[test]
     fn an_unknown_path_is_a_404_not_a_panic() {
-        let response = route("/this/does/not/exist.xyz", GRAPH);
+        let response = route("/this/does/not/exist.xyz", GRAPH, &empty());
         assert_eq!(response.status, 404);
     }
 

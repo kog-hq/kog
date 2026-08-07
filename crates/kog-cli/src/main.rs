@@ -38,6 +38,15 @@ enum Command {
         /// Also write Cypher here, to load into Neo4j with `cypher-shell`.
         #[arg(long, value_name = "FILE")]
         cypher: Option<PathBuf>,
+        /// Also write the graph as YAML here.
+        #[arg(long, value_name = "FILE")]
+        yaml: Option<PathBuf>,
+        /// Also write the numbers as a Markdown report here.
+        #[arg(long, value_name = "FILE")]
+        markdown: Option<PathBuf>,
+        /// Also write an Obsidian vault here: one note per file, wikilinked.
+        #[arg(long, value_name = "DIR")]
+        obsidian: Option<PathBuf>,
     },
     /// Scan a project and serve the graph in a browser.
     ///
@@ -96,7 +105,20 @@ fn main() -> Result<()> {
             output,
             graphml,
             cypher,
-        } => scan(root, output, graphml, cypher),
+            yaml,
+            markdown,
+            obsidian,
+        } => scan(
+            root,
+            Exports {
+                output,
+                graphml,
+                cypher,
+                yaml,
+                markdown,
+                obsidian,
+            },
+        ),
         Command::View { root } => view(root),
         Command::Query {
             question,
@@ -264,12 +286,19 @@ fn print_workspace(workspace: &Workspace) {
 ///
 /// Every format is behind its own flag and none is a default: a scan that
 /// wrote four files because you ran it is a scan you stop running.
-fn scan(
-    root: PathBuf,
+/// Where a scan was asked to write, by format. Grouped so adding a format
+/// does not lengthen a signature every test has to repeat.
+#[derive(Default)]
+struct Exports {
     output: Option<PathBuf>,
     graphml: Option<PathBuf>,
     cypher: Option<PathBuf>,
-) -> Result<()> {
+    yaml: Option<PathBuf>,
+    markdown: Option<PathBuf>,
+    obsidian: Option<PathBuf>,
+}
+
+fn scan(root: PathBuf, exports: Exports) -> Result<()> {
     let root = canonicalize_root(root)?;
     let workspace = scan_workspace(&root);
     print_workspace(&workspace);
@@ -282,11 +311,33 @@ fn scan(
         Ok(())
     };
 
-    write(output, &|| {
+    write(exports.output, &|| {
         serde_json::to_string_pretty(&workspace).unwrap_or_default()
     })?;
-    write(graphml, &|| kog_graph::graphml(&workspace))?;
-    write(cypher, &|| kog_graph::cypher(&workspace))?;
+    write(exports.graphml, &|| kog_graph::graphml(&workspace))?;
+    write(exports.cypher, &|| kog_graph::cypher(&workspace))?;
+    write(exports.yaml, &|| kog_graph::yaml(&workspace))?;
+    write(exports.markdown, &|| kog_graph::markdown(&workspace))?;
+
+    // A vault is a directory of notes rather than one file, so it does not go
+    // through `write`.
+    if let Some(vault) = exports.obsidian {
+        let notes = kog_graph::obsidian(&workspace);
+        for note in &notes {
+            let path = vault.join(&note.path);
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)
+                    .with_context(|| format!("cannot create {}", parent.display()))?;
+            }
+            std::fs::write(&path, &note.body)
+                .with_context(|| format!("cannot write {}", path.display()))?;
+        }
+        println!(
+            "written                {} ({} notes)",
+            vault.display(),
+            notes.len()
+        );
+    }
 
     Ok(())
 }
@@ -325,7 +376,7 @@ fn view(root: PathBuf) -> Result<()> {
     }
 
     for request in server.incoming_requests() {
-        let decision = server::route(request.url(), &graph_json);
+        let decision = server::route(request.url(), &graph_json, &workspace);
         if let Err(e) = server::respond(request, decision) {
             eprintln!("warning: failed to respond to a request: {e}");
         }
@@ -401,7 +452,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let missing = dir.path().join("does-not-exist");
 
-        let err = scan(missing.clone(), None, None, None).unwrap_err();
+        let err = scan(missing.clone(), Exports::default()).unwrap_err();
 
         let message = err.to_string();
         assert!(
@@ -422,7 +473,7 @@ mod tests {
         let file = dir.path().join("not-a-directory.txt");
         fs::write(&file, "hello").unwrap();
 
-        let err = scan(file.clone(), None, None, None).unwrap_err();
+        let err = scan(file.clone(), Exports::default()).unwrap_err();
 
         let message = err.to_string();
         assert!(
@@ -444,7 +495,14 @@ mod tests {
         fs::write(root.join("src/b.ts"), "export const b = 1;").unwrap();
         let output = dir.path().join("graph.json");
 
-        scan(root, Some(output.clone()), None, None).unwrap();
+        scan(
+            root,
+            Exports {
+                output: Some(output.clone()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
 
         assert!(output.exists(), "scan -o should have written {output:?}");
         let contents = fs::read_to_string(&output).unwrap();
@@ -478,7 +536,14 @@ mod tests {
         }
         let output = dir.path().join("graph.json");
 
-        scan(root, Some(output.clone()), None, None).unwrap();
+        scan(
+            root,
+            Exports {
+                output: Some(output.clone()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
 
         let json: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(&output).unwrap()).unwrap();
@@ -523,7 +588,14 @@ mod tests {
         fs::write(root.join("src/bad.ts"), [0xff, 0xfe, 0xfd]).unwrap();
         let output = dir.path().join("graph.json");
 
-        scan(root, Some(output.clone()), None, None).expect("an unreadable file must not be fatal");
+        scan(
+            root,
+            Exports {
+                output: Some(output.clone()),
+                ..Default::default()
+            },
+        )
+        .expect("an unreadable file must not be fatal");
 
         let contents = fs::read_to_string(&output).unwrap();
         let json: serde_json::Value = serde_json::from_str(&contents).unwrap();
@@ -544,7 +616,7 @@ mod tests {
         fs::create_dir_all(root.join("src")).unwrap();
         fs::write(root.join("src/a.ts"), "export const a = 1;").unwrap();
 
-        scan(root.clone(), None, None, None).unwrap();
+        scan(root.clone(), Exports::default()).unwrap();
 
         assert!(
             fs::read_dir(&root)
@@ -568,6 +640,9 @@ mod tests {
                 output: None,
                 graphml: None,
                 cypher: None,
+                yaml: None,
+                markdown: None,
+                obsidian: None,
             })
         );
     }
@@ -604,6 +679,9 @@ mod tests {
                 output: Some(PathBuf::from("g.json")),
                 graphml: None,
                 cypher: None,
+                yaml: None,
+                markdown: None,
+                obsidian: None,
             })
         );
     }
@@ -622,7 +700,14 @@ mod tests {
         fs::write(root.join("src/a.ts"), r#"import { x } from "./lib";"#).unwrap();
 
         let graphml = dir.path().join("g.graphml");
-        scan(root.clone(), None, Some(graphml.clone()), None).unwrap();
+        scan(
+            root.clone(),
+            Exports {
+                graphml: Some(graphml.clone()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
 
         let written = fs::read_to_string(&graphml).unwrap();
         assert!(written.contains("<node id=\"src/a.ts\">"), "got {written}");
@@ -633,7 +718,14 @@ mod tests {
         );
 
         let cypher = dir.path().join("g.cypher");
-        scan(root, None, None, Some(cypher.clone())).unwrap();
+        scan(
+            root,
+            Exports {
+                cypher: Some(cypher.clone()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
         assert!(fs::read_to_string(&cypher)
             .unwrap()
             .contains("MERGE (a)-[:IMPORTS]->(b)"));
@@ -658,6 +750,9 @@ mod tests {
                 output: None,
                 graphml: Some(PathBuf::from("g.graphml")),
                 cypher: Some(PathBuf::from("g.cypher")),
+                yaml: None,
+                markdown: None,
+                obsidian: None,
             })
         );
     }

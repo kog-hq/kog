@@ -11,6 +11,7 @@ import {
   canvasTheme,
   communityColour,
   edgeInk,
+  mix,
   languageColour,
   shadeKey,
   type CanvasTheme,
@@ -80,6 +81,31 @@ const LABEL_ALL_NEIGHBOURS_UP_TO = 40;
 /** How long the camera takes to travel to a selection, in milliseconds. */
 const TRAVEL_MS = 320;
 
+/**
+ * How long the pointer must rest on a node before its neighbourhood lights up.
+ *
+ * This is the whole difference between the effect and the strobe. Answering a
+ * hover instantly means dragging the pointer across a dense cluster fires on
+ * every node it crosses; waiting for the pointer to stop means the effect only
+ * ever runs when someone is actually looking at something.
+ */
+const HOVER_DELAY_MS = 140;
+
+/** How long the rest of the graph takes to fade back, in milliseconds. */
+const FADE_MS = 180;
+
+/**
+ * How many distinct steps the fade is quantised to.
+ *
+ * Blending a colour means parsing two hex strings and formatting a third, and
+ * the dimmed set is most of the graph — at 60 frames a second on 2,800 nodes
+ * that is a quarter of a million string operations per second, which is what
+ * made the fade stutter rather than glide. Quantising lets the results be
+ * cached: sixteen steps is more than the eye resolves over 180 ms, and it
+ * turns the per-frame cost into a map lookup.
+ */
+const FADE_STEPS = 16;
+
 function prefersReducedMotion(): boolean {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
@@ -102,6 +128,17 @@ type Props = CanvasState & {
   index: ProjectIndex;
   communities: Communities;
   onSelect: (id: string | null) => void;
+  onHover: (id: string | null) => void;
+  /**
+   * Filled in with a function that captures the canvas.
+   *
+   * The capture has to live next to the renderer: sigma draws nodes and edges
+   * in WebGL, and a WebGL drawing buffer is cleared once the browser has
+   * composited it. Reading it from anywhere else returns a transparent image
+   * — which is exactly what happened, and produced a PNG of nothing but the
+   * labels, those being the only layer drawn in plain 2D.
+   */
+  capture: React.RefObject<(() => string | null) | null>;
 };
 
 /**
@@ -207,6 +244,8 @@ export function GraphCanvas(props: Props) {
     colourBy,
     theme,
     onSelect,
+    onHover,
+    capture,
   } = props;
 
   const container = useRef<HTMLDivElement>(null);
@@ -214,6 +253,8 @@ export function GraphCanvas(props: Props) {
   // Read by the edge reducer on every repaint, written when the camera
   // settles. A ref rather than state: it must not re-render React.
   const onScreen = useRef<Box>(null);
+  /** How far the graph has faded back behind whatever is being read, 0 to 1. */
+  const fade = useRef(0);
 
   // The layout is the expensive part, so it is tied to what actually changes
   // its shape: the project and whether folders are collapsed. Filters,
@@ -316,6 +357,56 @@ export function GraphCanvas(props: Props) {
     renderer.on("clickNode", ({ node }) => onSelect(node));
     renderer.on("clickStage", () => onSelect(null));
 
+    // Hover, after the pointer has stopped. See `HOVER_DELAY_MS`.
+    let resting: number | undefined;
+    renderer.on("enterNode", ({ node }) => {
+      // A node is clickable and draggable, so it should say so before you
+      // find out by trying.
+      if (container.current) container.current.style.cursor = "pointer";
+      window.clearTimeout(resting);
+      resting = window.setTimeout(() => onHover(node), HOVER_DELAY_MS);
+    });
+    renderer.on("leaveNode", () => {
+      if (container.current) container.current.style.cursor = "";
+      window.clearTimeout(resting);
+      onHover(null);
+    });
+
+    // Dragging a node. The camera is disabled for the duration, or the drag
+    // pans the view instead of moving the node.
+    let dragged: string | null = null;
+    renderer.on("downNode", ({ node }) => {
+      dragged = node;
+      if (container.current) container.current.style.cursor = "grabbing";
+      renderer.getCamera().disable();
+    });
+    const mouse = renderer.getMouseCaptor();
+    const onMove = (event: {
+      x: number;
+      y: number;
+      preventSigmaDefault: () => void;
+      original: Event;
+    }) => {
+      if (!dragged) return;
+      const at = renderer.viewportToGraph(event);
+      graph.setNodeAttribute(dragged, "x", at.x);
+      graph.setNodeAttribute(dragged, "y", at.y);
+      // Sigma would otherwise also pan; the browser would otherwise select
+      // text across the page while the button is held.
+      event.preventSigmaDefault();
+      event.original.preventDefault();
+      event.original.stopPropagation();
+    };
+    const onRelease = () => {
+      if (!dragged) return;
+      dragged = null;
+      if (container.current) container.current.style.cursor = "pointer";
+      renderer.getCamera().enable();
+    };
+    mouse.on("mousemovebody", onMove);
+    mouse.on("mouseup", onRelease);
+    mouse.on("mouseleave", onRelease);
+
     // Recompute what is on screen once the camera settles, and repaint.
     //
     // Debounced rather than per-frame: the edge set only has to be right when
@@ -334,13 +425,47 @@ export function GraphCanvas(props: Props) {
 
     return () => {
       window.clearTimeout(settle);
+      window.clearTimeout(resting);
+      mouse.off("mousemovebody", onMove);
+      mouse.off("mouseup", onRelease);
+      mouse.off("mouseleave", onRelease);
       renderer.kill();
       sigma.current = null;
     };
     // Deliberately not keyed on the theme: colours are decided in the
     // reducers, so a theme change is a repaint and never a rebuild.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [graph, onSelect, frame]);
+  }, [graph, onSelect, onHover, frame]);
+
+  /**
+   * Fade the rest of the graph back, rather than switching it off.
+   *
+   * A hard cut is what read as a flash. The loop runs for `FADE_MS` and then
+   * stops on its own — an idle canvas still costs nothing.
+   */
+  useEffect(() => {
+    const renderer = sigma.current;
+    if (!renderer) return;
+    const target = focus ? 1 : 0;
+    if (prefersReducedMotion()) {
+      fade.current = target;
+      renderer.refresh({ skipIndexation: true });
+      return;
+    }
+    const from = fade.current;
+    if (from === target) return;
+    const started = performance.now();
+    let raf = 0;
+    const step = () => {
+      const progress = Math.min(1, (performance.now() - started) / FADE_MS);
+      // Ease out: fast enough to feel like a response, slow enough not to snap.
+      fade.current = from + (target - from) * progress * (2 - progress);
+      renderer.refresh({ skipIndexation: true });
+      if (progress < 1) raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [focus]);
 
   // Filtering, selection and hover are all one repaint: sigma asks these
   // reducers what each node and edge looks like right now.
@@ -349,6 +474,18 @@ export function GraphCanvas(props: Props) {
     if (!renderer) return;
     const canvas = canvasTheme(theme);
     const ink = edgeInk(graph.size, theme);
+
+    // Keyed by fill and step, and rebuilt whenever the palette can change.
+    const dimmed = new Map<string, string>();
+    const towardsBackground = (fill: string, away: number): string => {
+      const step = Math.round(away * FADE_STEPS);
+      const key = `${fill}|${step}`;
+      const cached = dimmed.get(key);
+      if (cached !== undefined) return cached;
+      const blended = mix(canvas.dim, fill, step / FADE_STEPS);
+      dimmed.set(key, blended);
+      return blended;
+    };
 
     renderer.setSetting("nodeReducer", (node, data) => {
       if (visible && !visible.has(node)) return { ...data, hidden: true };
@@ -395,11 +532,15 @@ export function GraphCanvas(props: Props) {
         // to stop competing while you read one. `dim` sits close to the
         // background on purpose — the mid grey it used to use turned the rest
         // of a 900-node graph into one solid slab.
+        //
+        // Blended by `fade` rather than applied outright, which is what makes
+        // this an effect instead of a flash.
+        const away = fade.current;
         return {
           ...data,
-          color: canvas.dim,
-          size: data.size * 0.55,
-          label: "",
+          color: towardsBackground(fill, away),
+          size: data.size * (1 - 0.45 * away),
+          label: away > 0.5 ? "" : data.label,
           zIndex: 0,
         };
       }
@@ -494,6 +635,38 @@ export function GraphCanvas(props: Props) {
     if (selected) return;
     frame(visible ? [...visible] : graph.nodes(), true);
   }, [visible, selected, graph, frame]);
+
+  // Re-render, then read the buffer in the same task, before the browser
+  // composites and clears it.
+  useEffect(() => {
+    capture.current = () => {
+      const renderer = sigma.current;
+      const element = container.current;
+      if (!renderer || !element) return null;
+      renderer.refresh();
+
+      const layers = [...element.querySelectorAll("canvas")].filter(
+        (canvas) => !canvas.classList.contains("sigma-mouse"),
+      );
+      const first = layers[0];
+      if (!first) return null;
+
+      const out = document.createElement("canvas");
+      out.width = first.width;
+      out.height = first.height;
+      const context = out.getContext("2d");
+      if (!context) return null;
+      // A transparent PNG of a light-on-dark graph is invisible in most
+      // viewers, so the theme's own background is painted first.
+      context.fillStyle = canvasTheme(theme).background;
+      context.fillRect(0, 0, out.width, out.height);
+      for (const layer of layers) context.drawImage(layer, 0, 0);
+      return out.toDataURL("image/png");
+    };
+    return () => {
+      capture.current = null;
+    };
+  }, [capture, theme]);
 
   return <div ref={container} className="absolute inset-0" />;
 }

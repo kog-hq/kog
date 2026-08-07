@@ -57,6 +57,39 @@ const LANGUAGE: Record<string, Swatch> = {
   markdown: { light: "#6a737d", dark: "#9aa3ad" },
 };
 
+/**
+ * Community colours, in fixed order, biggest community first.
+ *
+ * The Tableau 10 ramp, which is what a decade of dashboards has trained
+ * everyone to read as "these are different groups" — and, unlike a hash of a
+ * folder name, it is a chosen order rather than a coincidence. Past the tenth
+ * community the ramp does not repeat: everything after it is grey, because
+ * an eleventh hue would only be distinguishable from one of the first ten by
+ * accident.
+ */
+const COMMUNITY: Swatch[] = [
+  { light: "#3d6fb4", dark: "#5b9bd5" },
+  { light: "#d1701c", dark: "#f0913f" },
+  { light: "#b8393b", dark: "#e8595c" },
+  { light: "#4a9c95", dark: "#5fc4bc" },
+  { light: "#4f9146", dark: "#6cbf5f" },
+  { light: "#b59a2e", dark: "#ddc04a" },
+  { light: "#9a5fa8", dark: "#bb85c8" },
+  { light: "#c96f9a", dark: "#e895bb" },
+  { light: "#8a6f5e", dark: "#a89282" },
+  { light: "#7a7f8c", dark: "#9aa0ad" },
+];
+
+/** Past the tenth community, and for anything unassigned. */
+const OUT_OF_PALETTE: Swatch = { light: "#9ca0ad", dark: "#575b66" };
+
+export function communityColour(community: number, theme: Theme): string {
+  const slot = COMMUNITY[community];
+  return swatch(slot ?? OUT_OF_PALETTE, theme);
+}
+
+export const COMMUNITY_SLOTS = COMMUNITY.length;
+
 /** A language with no entry of its own: named, never given an invented hue. */
 const UNKNOWN_LANGUAGE: Swatch = { light: "#7f8494", dark: "#8b90a0" };
 
@@ -173,7 +206,7 @@ export const CANVAS: Record<
   light: {
     background: "#fbfbfd",
     edge: "#b4b8c4",
-    edgeMuted: "#dcdee6",
+    edgeMuted: "#e3e5ec",
     label: "#15151a",
     labelHalo: "rgba(251,251,253,0.86)",
     focus: "#101014",

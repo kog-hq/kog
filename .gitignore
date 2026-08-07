@@ -22,3 +22,6 @@ config.local.toml
 
 # Subagent-driven development scratch (ledger, briefs, review packages)
 /.superpowers/
+
+# graphify's own output, when KOG is scanned by it
+graphify-out/

@@ -1,15 +1,7 @@
-import { AlertTriangle, EyeOff, Layers, Unplug } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { Switch } from "@/components/ui/switch";
+import { EyeOff } from "lucide-react";
 import { CoverageMeter, Figure } from "@/components/meter";
-import type {
-  KogDiagnostic,
-  KogProject,
-  NodeKind,
-  ProjectIndex,
-} from "@/lib/kog";
-import { KIND_LABEL, formatCount, formatRate } from "@/lib/kog";
-import { languageColour, type Theme } from "@/lib/palette";
+import type { KogDiagnostic, KogProject, NodeKind } from "@/lib/kog";
+import { formatCount, formatRate } from "@/lib/kog";
 
 export type Filters = {
   /** `null` means every language; a set means only these. */
@@ -55,30 +47,6 @@ function Group({
       </header>
       {children}
     </section>
-  );
-}
-
-function Toggle({
-  checked,
-  onChange,
-  icon,
-  children,
-}: {
-  checked: boolean;
-  onChange: (value: boolean) => void;
-  icon: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  return (
-    <label className="row flex cursor-pointer items-center gap-2 rounded-md px-1.5 py-1.5">
-      <span className="text-muted-foreground">{icon}</span>
-      <span className="flex-1 text-[12px]">{children}</span>
-      <Switch
-        checked={checked}
-        onCheckedChange={onChange}
-        className="scale-75"
-      />
-    </label>
   );
 }
 
@@ -157,133 +125,6 @@ export function MeasuresPanel({ project }: { project: KogProject }) {
           </ul>
         </Group>
       )}
-    </>
-  );
-}
-
-/** Languages double as the legend: the dot is the colour on the canvas. */
-export function FiltersPanel({
-  index,
-  filters,
-  onFilters,
-  groupByFolder,
-  onGroupByFolder,
-  theme,
-  showLanguages = true,
-}: {
-  index: ProjectIndex;
-  filters: Filters;
-  onFilters: (next: Filters) => void;
-  groupByFolder: boolean;
-  onGroupByFolder: (value: boolean) => void;
-  theme: Theme;
-  /** False when the caller already shows the language list itself. */
-  showLanguages?: boolean;
-}) {
-  function toggleLanguage(lang: string) {
-    const current =
-      filters.languages ?? new Set(index.languages.map((l) => l.lang));
-    const next = new Set(current);
-    if (next.has(lang)) next.delete(lang);
-    else next.add(lang);
-    onFilters({
-      ...filters,
-      languages: next.size === index.languages.length ? null : next,
-    });
-  }
-
-  function toggleKind(kind: NodeKind) {
-    const next = new Set(filters.kinds);
-    if (next.has(kind)) next.delete(kind);
-    else next.add(kind);
-    onFilters({ ...filters, kinds: next });
-  }
-
-  return (
-    <>
-      {showLanguages && (
-        <Group title="Languages" count={`${index.languages.length}`}>
-          <ul className="flex flex-col">
-            {index.languages.map((row) => {
-              const active =
-                !filters.languages || filters.languages.has(row.lang);
-              return (
-                <li key={row.lang}>
-                  <button
-                    type="button"
-                    onClick={() => toggleLanguage(row.lang)}
-                    aria-pressed={active}
-                    className={cn(
-                      "row flex w-full items-center gap-2.5 rounded-md px-1.5 py-1.5 text-left",
-                      !active && "opacity-35",
-                    )}
-                  >
-                    <span
-                      className="size-2.5 shrink-0 rounded-full"
-                      style={{
-                        background: languageColour(row.lang, false, theme),
-                      }}
-                    />
-                    <span className="flex-1 truncate text-[12px]">
-                      {row.lang}
-                    </span>
-                    <span className="num text-[11px] text-muted-foreground">
-                      {row.files}
-                    </span>
-                    <span className="num w-[56px] text-right text-[11px] text-muted-foreground">
-                      {row.unread ? "not read" : formatRate(row.rate)}
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        </Group>
-      )}
-
-      <Group title="Show">
-        <div className="flex flex-col gap-0.5">
-          {index.kinds.map(({ kind, count }) => (
-            <label
-              key={kind}
-              className="row flex cursor-pointer items-center gap-2 rounded-md px-1.5 py-1.5"
-            >
-              <span className="flex-1 text-[12px]">{KIND_LABEL[kind]}</span>
-              <span className="num text-[11px] text-muted-foreground">
-                {formatCount(count)}
-              </span>
-              <Switch
-                checked={filters.kinds.has(kind)}
-                onCheckedChange={() => toggleKind(kind)}
-                className="scale-75"
-              />
-            </label>
-          ))}
-          <Toggle
-            checked={filters.hideIsolated}
-            onChange={(value) => onFilters({ ...filters, hideIsolated: value })}
-            icon={<Unplug className="size-3.5" />}
-          >
-            hide unconnected
-          </Toggle>
-          <Toggle
-            checked={filters.onlyUnresolved}
-            onChange={(value) =>
-              onFilters({ ...filters, onlyUnresolved: value })
-            }
-            icon={<AlertTriangle className="size-3.5" />}
-          >
-            files with gaps
-          </Toggle>
-          <Toggle
-            checked={groupByFolder}
-            onChange={onGroupByFolder}
-            icon={<Layers className="size-3.5" />}
-          >
-            group by folder
-          </Toggle>
-        </div>
-      </Group>
     </>
   );
 }

@@ -1,13 +1,16 @@
 import Sigma from "sigma";
+import { EdgeCurvedArrowProgram } from "@sigma/edge-curve";
 import { EdgeArrowProgram } from "sigma/rendering";
 import type { Settings } from "sigma/settings";
 import type { NodeDisplayData, PartialButFor } from "sigma/types";
 import { useEffect, useMemo, useRef } from "react";
 import { createNodeBorderProgram } from "@sigma/node-border";
 import { CursorField } from "./cursor-field";
-import { buildGraph } from "./build";
+import { buildGraph, type ColourBy } from "./build";
+import type { Communities } from "./communities";
 import {
   canvasTheme,
+  communityColour,
   languageColour,
   shadeKey,
   type CanvasTheme,
@@ -23,15 +26,15 @@ export type LabelMode = "none" | "hubs" | "more" | "all";
  */
 const LABEL_MODES: Record<LabelMode, { threshold: number; density: number }> = {
   none: { threshold: Infinity, density: 1 },
-  hubs: { threshold: 8, density: 1 },
-  more: { threshold: 4, density: 3 },
+  hubs: { threshold: 12, density: 1 },
+  more: { threshold: 5, density: 2 },
   all: { threshold: 0, density: 20 },
 };
 
 /** Every name on a small graph, only the hubs on a large one. */
 export function defaultLabelMode(nodeCount: number): LabelMode {
-  if (nodeCount <= 150) return "all";
-  if (nodeCount <= 700) return "more";
+  if (nodeCount <= 120) return "all";
+  if (nodeCount <= 400) return "more";
   return "hubs";
 }
 
@@ -87,12 +90,14 @@ export type CanvasState = {
   hovered: string | null;
   labelMode: LabelMode;
   groupByFolder: boolean;
+  colourBy: ColourBy;
   theme: Theme;
 };
 
 type Props = CanvasState & {
   project: KogProject;
   index: ProjectIndex;
+  communities: Communities;
   onSelect: (id: string | null) => void;
   onHover: (id: string | null) => void;
 };
@@ -164,11 +169,13 @@ export function GraphCanvas(props: Props) {
   const {
     project,
     index,
+    communities,
     visible,
     selected,
     hovered,
     labelMode,
     groupByFolder,
+    colourBy,
     theme,
     onSelect,
     onHover,
@@ -188,12 +195,11 @@ export function GraphCanvas(props: Props) {
   // its shape: the project and whether folders are collapsed. Filters,
   // selection, colour mode and hover never reach here.
   const graph = useMemo(
-    () => buildGraph(project, index, theme, { groupByFolder }),
+    () => buildGraph(project, index, communities, { groupByFolder }),
     // Deliberately not keyed on the theme: a theme change recolours in
     // place. Relaying out a 2,800-node graph to change its palette would
     // throw away the shape the reader had just learned.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [project, index, groupByFolder],
+    [project, index, communities, groupByFolder],
   );
 
   /** The anchor for highlighting, and the two directions around it. */
@@ -222,7 +228,15 @@ export function GraphCanvas(props: Props) {
       // Arrows are registered but never the default: 3,000 arrowheads at low
       // zoom is noise. The reducer promotes an edge to an arrow only while it
       // is being read.
-      edgeProgramClasses: { arrow: EdgeArrowProgram },
+      // Curves, not straight lines. Two files linked across a cluster draw
+      // a chord that leaves the middle alone, where a straight line cuts
+      // through everything between them — which is what made the graph look
+      // like a scribble rather than a map.
+      defaultEdgeType: "curve",
+      edgeProgramClasses: {
+        curve: EdgeCurvedArrowProgram,
+        arrow: EdgeArrowProgram,
+      },
       defaultNodeType: "bordered",
       nodeProgramClasses: { bordered: NodeWithRing },
       labelFont: '"JetBrains Mono Variable", ui-monospace, monospace',
@@ -235,6 +249,9 @@ export function GraphCanvas(props: Props) {
     });
     sigma.current = renderer;
     field.current = new CursorField(graph);
+    // The layout's extent changes with the graph, so the camera is reset to
+    // frame it rather than left wherever the previous one sat.
+    renderer.getCamera().setState({ x: 0.5, y: 0.5, ratio: 1.05, angle: 0 });
 
     renderer.on("clickNode", ({ node }) => onSelect(node));
     renderer.on("clickStage", () => onSelect(null));
@@ -449,12 +466,15 @@ export function GraphCanvas(props: Props) {
       // Colour is computed here rather than stored on the node, so the
       // theme can never be one repaint behind: there is no cached attribute
       // to go stale.
-      const fill = languageColour(
-        data.lang as string,
-        data.kind === "asset",
-        theme,
-        shadeKey(node),
-      );
+      const fill =
+        colourBy === "community"
+          ? communityColour(data.community as number, theme)
+          : languageColour(
+              data.lang as string,
+              data.kind === "asset",
+              theme,
+              shadeKey(node),
+            );
       const glow = crest(node);
 
       if (node === selected) {
@@ -549,7 +569,7 @@ export function GraphCanvas(props: Props) {
     );
     renderer.setSetting("defaultEdgeColor", canvas.edgeMuted);
     renderer.refresh();
-  }, [graph, index, visible, selected, focus, blast, theme]);
+  }, [graph, index, visible, selected, focus, blast, colourBy, theme]);
 
   useEffect(() => {
     const renderer = sigma.current;

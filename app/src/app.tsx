@@ -7,6 +7,8 @@ import {
 import { FindFile } from "@/components/find-file";
 import { Inspector } from "@/components/inspector";
 import { Rail } from "@/components/rail";
+import { detectCommunities } from "@/graph/communities";
+import type { ColourBy } from "@/graph/build";
 import { NO_FILTERS, type Filters } from "@/components/panels";
 import { indexProject, type KogWorkspace } from "@/lib/kog";
 
@@ -29,10 +31,19 @@ export function App({ workspace }: { workspace: KogWorkspace }) {
   const [hovered, setHovered] = useState<string | null>(null);
   const [searching, setSearching] = useState(false);
   const [groupByFolder, setGroupByFolder] = useState(false);
+  // Community by default: on a repository that is 84 % one language, colouring
+  // by language paints one colour and says nothing. Communities are what the
+  // graph itself found.
+  const [colourBy, setColourBy] = useState<ColourBy>("community");
+  /** Communities the reader has switched off; empty means all of them. */
+  const [hiddenCommunities, setHiddenCommunities] = useState<Set<number>>(
+    new Set(),
+  );
   const [filters, setFilters] = useState<Filters>(NO_FILTERS);
 
   const project = workspace.projects[projectIndex];
   const index = useMemo(() => indexProject(project), [project]);
+  const communities = useMemo(() => detectCommunities(project), [project]);
   const [labelMode, setLabelMode] = useState<LabelMode>(() =>
     defaultLabelMode(project.graph.nodes.length),
   );
@@ -46,6 +57,7 @@ export function App({ workspace }: { workspace: KogWorkspace }) {
   // in it, and its size may call for a different number of labels.
   useEffect(() => {
     setSelected(null);
+    setHiddenCommunities(new Set());
     setLabelMode(defaultLabelMode(project.graph.nodes.length));
   }, [project]);
 
@@ -71,6 +83,7 @@ export function App({ workspace }: { workspace: KogWorkspace }) {
   /** Ids that survive the filters, or `null` when nothing is filtered out. */
   const visible = useMemo(() => {
     const everything =
+      hiddenCommunities.size === 0 &&
       filters.languages === null &&
       filters.kinds.size === NO_FILTERS.kinds.size &&
       !filters.hideIsolated &&
@@ -80,6 +93,8 @@ export function App({ workspace }: { workspace: KogWorkspace }) {
     const keep = new Set<string>();
     for (const node of project.graph.nodes) {
       if (!filters.kinds.has(node.kind)) continue;
+      if (hiddenCommunities.has(communities.byNode.get(node.id) ?? -1))
+        continue;
       if (filters.languages && !filters.languages.has(node.lang)) continue;
       if (filters.hideIsolated && (index.degree.get(node.id) ?? 0) === 0)
         continue;
@@ -97,7 +112,7 @@ export function App({ workspace }: { workspace: KogWorkspace }) {
       folders.add(cut === -1 ? "." : id.slice(0, cut));
     }
     return folders;
-  }, [filters, project, index, groupByFolder]);
+  }, [filters, project, index, groupByFolder, communities, hiddenCommunities]);
 
   const selectedNode = selected ? index.byId.get(selected) : undefined;
   const onSelect = useCallback((id: string | null) => setSelected(id), []);
@@ -111,6 +126,11 @@ export function App({ workspace }: { workspace: KogWorkspace }) {
         workspace={workspace}
         project={project}
         index={index}
+        communities={communities}
+        hiddenCommunities={hiddenCommunities}
+        onHiddenCommunities={setHiddenCommunities}
+        colourBy={colourBy}
+        onColourBy={setColourBy}
         onProject={setProjectIndex}
         onSearch={() => setSearching(true)}
         filters={filters}
@@ -129,11 +149,13 @@ export function App({ workspace }: { workspace: KogWorkspace }) {
         <GraphCanvas
           project={project}
           index={index}
+          communities={communities}
           visible={visible}
           selected={selected}
           hovered={hovered}
           labelMode={labelMode}
           groupByFolder={groupByFolder}
+          colourBy={colourBy}
           theme={theme}
           onSelect={onSelect}
           onHover={onHover}

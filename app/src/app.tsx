@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   GraphCanvas,
   defaultLabelMode,
+  type EdgeMode,
   type LabelMode,
 } from "@/graph/graph-canvas";
 import { FindFile } from "@/components/find-file";
@@ -40,6 +41,7 @@ export function App({ workspace }: { workspace: KogWorkspace }) {
     new Set(),
   );
   const [filters, setFilters] = useState<Filters>(NO_FILTERS);
+  const [edgeMode, setEdgeMode] = useState<EdgeMode>("linked");
 
   const project = workspace.projects[projectIndex];
   const index = useMemo(() => indexProject(project), [project]);
@@ -148,6 +150,8 @@ export function App({ workspace }: { workspace: KogWorkspace }) {
         onGroupByFolder={setGroupByFolder}
         labelMode={labelMode}
         onLabelMode={setLabelMode}
+        edgeMode={edgeMode}
+        onEdgeMode={setEdgeMode}
         theme={theme}
         onTheme={() => setTheme(theme === "dark" ? "light" : "dark")}
         onSelect={setSelected}
@@ -163,6 +167,7 @@ export function App({ workspace }: { workspace: KogWorkspace }) {
           selected={selected}
           hovered={hovered}
           labelMode={labelMode}
+          edgeMode={edgeMode}
           groupByFolder={groupByFolder}
           colourBy={colourBy}
           theme={theme}

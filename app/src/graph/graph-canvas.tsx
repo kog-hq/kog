@@ -102,6 +102,16 @@ type Props = CanvasState & {
   index: ProjectIndex;
   communities: Communities;
   onSelect: (id: string | null) => void;
+  /**
+   * Filled in with a function that captures the canvas.
+   *
+   * The capture has to live next to the renderer: sigma draws nodes and edges
+   * in WebGL, and a WebGL drawing buffer is cleared once the browser has
+   * composited it. Reading it from anywhere else returns a transparent image
+   * — which is exactly what happened, and produced a PNG of nothing but the
+   * labels, those being the only layer drawn in plain 2D.
+   */
+  capture: React.RefObject<(() => string | null) | null>;
 };
 
 /**
@@ -207,6 +217,7 @@ export function GraphCanvas(props: Props) {
     colourBy,
     theme,
     onSelect,
+    capture,
   } = props;
 
   const container = useRef<HTMLDivElement>(null);
@@ -494,6 +505,38 @@ export function GraphCanvas(props: Props) {
     if (selected) return;
     frame(visible ? [...visible] : graph.nodes(), true);
   }, [visible, selected, graph, frame]);
+
+  // Re-render, then read the buffer in the same task, before the browser
+  // composites and clears it.
+  useEffect(() => {
+    capture.current = () => {
+      const renderer = sigma.current;
+      const element = container.current;
+      if (!renderer || !element) return null;
+      renderer.refresh();
+
+      const layers = [...element.querySelectorAll("canvas")].filter(
+        (canvas) => !canvas.classList.contains("sigma-mouse"),
+      );
+      const first = layers[0];
+      if (!first) return null;
+
+      const out = document.createElement("canvas");
+      out.width = first.width;
+      out.height = first.height;
+      const context = out.getContext("2d");
+      if (!context) return null;
+      // A transparent PNG of a light-on-dark graph is invisible in most
+      // viewers, so the theme's own background is painted first.
+      context.fillStyle = canvasTheme(theme).background;
+      context.fillRect(0, 0, out.width, out.height);
+      for (const layer of layers) context.drawImage(layer, 0, 0);
+      return out.toDataURL("image/png");
+    };
+    return () => {
+      capture.current = null;
+    };
+  }, [capture, theme]);
 
   return <div ref={container} className="absolute inset-0" />;
 }

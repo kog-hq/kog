@@ -1,26 +1,19 @@
 /**
- * What a colour means on the canvas.
+ * A colour says which language. That is all it says.
  *
- * Colour is always on, and it always says the same thing: **which language
- * this file is written in**. That is the one property of a file that is both
- * stable and worth seeing from across the room — a monorepo's shape is its
- * languages meeting, and this is what draws that meeting.
+ * An earlier version spent colour on state — magenta for a language KOG
+ * cannot read, amber for a file with an unresolved import — and it was the
+ * wrong trade twice over. Colour is a poor carrier for a claim that needs a
+ * sentence ("this import resolved to nothing, on line 14"), and spending it
+ * on state means it can no longer say the one thing you can read across a
+ * whole graph at a glance: what this codebase is written in. The claims
+ * belong in the inspector, in words, where they already are.
  *
- * Hues are the ones developers already carry in their heads (Go's cyan,
- * Rust's rust, Ruby's red, Python's blue-and-yellow split resolved to blue)
- * but harmonised: every one sits in the same chroma and lightness band per
- * theme, so no language shouts over another and the whole reads as one
- * palette rather than a wall of vendor logos.
- *
- * State does not take a colour — it takes a **ring**, drawn on top:
- *
- *   magenta ring   KOG cannot read this language; its own imports are missing
- *   amber ring     this file has an import KOG could not resolve
- *   pale ring      selected
- *
- * That separation is what lets both be true at once. A `.sql` file is the
- * colour of SQL *and* wears the ring that says nothing was read out of it,
- * where a single fill could only ever have said one of the two.
+ * The hues are the ones you already know — GitHub's language colours, which
+ * every developer has been reading for a decade — lifted only where a value
+ * is too dark to survive on a near-black background. Same hue, legible
+ * surface: Go stays its cyan, TypeScript its deep blue, JavaScript its
+ * yellow.
  */
 
 export type Theme = "light" | "dark";
@@ -32,41 +25,43 @@ export function swatch(value: Swatch, theme: Theme): string {
 }
 
 /**
- * One entry per language KOG labels a node with, plus the common unread
- * ones. Keys match `Node::lang` from the scan exactly.
+ * Keys match `Node::lang` from the scan exactly. Where light and dark differ
+ * it is only in lightness: the dark column exists because `#701516` (Ruby)
+ * and `#1D365D` (Less) are invisible on `#0d0d0f`, not because the language
+ * changes colour.
  */
 const LANGUAGE: Record<string, Swatch> = {
-  typescript: { light: "#2f6fd0", dark: "#5b9bf0" },
-  javascript: { light: "#b8912a", dark: "#e3c04b" },
-  tsx: { light: "#2f6fd0", dark: "#5b9bf0" },
-  go: { light: "#0f8fa8", dark: "#3fc3dd" },
-  rust: { light: "#b4622c", dark: "#e08a4e" },
-  python: { light: "#3a6ea8", dark: "#6aa4e0" },
-  java: { light: "#a8562f", dark: "#df8b5e" },
-  csharp: { light: "#6b4bb8", dark: "#a888ec" },
-  ruby: { light: "#b83c46", dark: "#ef7078" },
-  php: { light: "#6a5bb5", dark: "#9c8ee8" },
-  c: { light: "#5a7290", dark: "#8fa9c6" },
-  cpp: { light: "#3f6f9a", dark: "#74a5cf" },
-  html: { light: "#c25a29", dark: "#ef8b52" },
-  css: { light: "#2b7fb8", dark: "#5fb4e6" },
-  sass: { light: "#b8578f", dark: "#e88dbd" },
-  less: { light: "#3f5f9a", dark: "#7d9ad6" },
-  stylus: { light: "#6f8f3f", dark: "#a6c46e" },
-  vue: { light: "#2f9270", dark: "#55c79c" },
-  svelte: { light: "#c2502c", dark: "#f08154" },
-  astro: { light: "#8a4fc4", dark: "#b98af0" },
-  shell: { light: "#4f8a4f", dark: "#7cc07c" },
-  sql: { light: "#a86a2c", dark: "#dba055" },
-  dockerfile: { light: "#2f7fb8", dark: "#5fb0e6" },
-  make: { light: "#7a7f8c", dark: "#a9aebc" },
+  typescript: { light: "#3178c6", dark: "#4a92e0" },
+  javascript: { light: "#c9a800", dark: "#f1e05a" },
+  python: { light: "#3572a5", dark: "#5b9bd5" },
+  go: { light: "#0091b3", dark: "#00add8" },
+  rust: { light: "#b7643a", dark: "#dea584" },
+  java: { light: "#b07219", dark: "#d69b4a" },
+  csharp: { light: "#178600", dark: "#3fb52a" },
+  ruby: { light: "#a01f21", dark: "#e0484b" },
+  php: { light: "#4f5d95", dark: "#7f8dc4" },
+  c: { light: "#5a5a5a", dark: "#9a9a9a" },
+  cpp: { light: "#d0335f", dark: "#f34b7d" },
+  html: { light: "#e34c26", dark: "#f4713f" },
+  css: { light: "#663399", dark: "#9a6fd4" },
+  sass: { light: "#c6538c", dark: "#e07cae" },
+  less: { light: "#1d365d", dark: "#5a7fb5" },
+  stylus: { light: "#5c7d33", dark: "#8fb95e" },
+  shell: { light: "#5aa32a", dark: "#89e051" },
+  vue: { light: "#35996b", dark: "#41b883" },
+  svelte: { light: "#e0350a", dark: "#ff5a2b" },
+  astro: { light: "#c1440e", dark: "#ff7a45" },
+  sql: { light: "#c47800", dark: "#e8a33d" },
+  dockerfile: { light: "#38566b", dark: "#6f93ad" },
+  make: { light: "#427819", dark: "#6faa3f" },
+  markdown: { light: "#6a737d", dark: "#9aa3ad" },
 };
 
-/** A language with no entry: named, but never given an invented hue. */
+/** A language with no entry of its own: named, never given an invented hue. */
 const UNKNOWN_LANGUAGE: Swatch = { light: "#7f8494", dark: "#8b90a0" };
 
 /** Not code. Drawn far enough back that it never competes with code. */
-const ASSET: Swatch = { light: "#cdd0da", dark: "#33363f" };
+const ASSET: Swatch = { light: "#c8cbd6", dark: "#2f323b" };
 
 /** Hex to HSL and back, so a shade can be taken without a colour library. */
 function toHsl(hex: string): [number, number, number] {
@@ -105,25 +100,24 @@ function toHex(h: number, s: number, l: number): string {
  *
  * A repository that is 727 TypeScript files out of 863 draws as one flat
  * blue if language is the only channel — true, and useless. Lightness is
- * free here (size already carries degree, hue carries language), so it goes
- * to the area of the codebase: `apps/backend` and `apps/frontend` come out
- * as two shades of the same blue. Same hue still means same language, which
- * is the property that had to survive.
+ * free (size carries degree, hue carries language), so it goes to the area
+ * of the codebase: `apps/backend` and `apps/frontend` come out as two shades
+ * of the same blue. Same hue still means same language, which is the
+ * property that had to survive.
  *
- * The range is deliberately narrow: wide enough to separate two areas side
- * by side, never wide enough to be mistaken for another language.
+ * Narrow on purpose: wide enough to separate two areas side by side, never
+ * wide enough to be mistaken for another language.
  */
-const SHADE_RANGE = 0.13;
+const SHADE_RANGE = 0.11;
 
 function shade(hex: string, seed: string, theme: Theme): string {
   if (!seed) return hex;
   let hash = 0;
   for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
   const [h, s, l] = toHsl(hex);
-  // −1…1, so a folder is as likely to come out lighter as darker.
   const offset = ((hash % 1000) / 500 - 1) * SHADE_RANGE;
-  const floor = theme === "dark" ? 0.42 : 0.3;
-  const ceiling = theme === "dark" ? 0.78 : 0.62;
+  const floor = theme === "dark" ? 0.44 : 0.28;
+  const ceiling = theme === "dark" ? 0.78 : 0.6;
   return toHex(h, s, Math.min(ceiling, Math.max(floor, l + offset)));
 }
 
@@ -144,18 +138,13 @@ export function languageColour(
   return shade(swatch(LANGUAGE[lang] ?? UNKNOWN_LANGUAGE, theme), seed, theme);
 }
 
-export function hasLanguageColour(lang: string): boolean {
-  return lang in LANGUAGE;
-}
-
 /**
  * Canvas colours, resolved from the theme rather than read back out of CSS.
  *
  * They used to come from `getComputedStyle`, which made the canvas depend on
  * *when* the `data-theme` attribute landed — and React runs a child's effects
- * before its parent's, so the canvas read the previous theme and stayed the
- * wrong colour until something else forced a repaint. A value that must be
- * correct at a particular moment should not be fetched from the DOM.
+ * before its parent's, so the canvas read the previous theme. A value that
+ * must be correct at a particular moment should not be fetched from the DOM.
  */
 export const CANVAS: Record<
   Theme,
@@ -165,30 +154,28 @@ export const CANVAS: Record<
     edgeMuted: string;
     label: string;
     labelHalo: string;
-    signal: string;
-    warn: string;
     focus: string;
+    /** The wave that runs out through a selection's dependents. */
+    pulse: string;
   }
 > = {
   dark: {
     background: "#0d0d0f",
     edge: "#3a3d47",
-    edgeMuted: "#23252c",
+    edgeMuted: "#21232a",
     label: "#e8e8ea",
     labelHalo: "rgba(13,13,15,0.82)",
-    signal: "#e0457b",
-    warn: "#e0a63f",
-    focus: "#f2f3f7",
+    focus: "#f4f5f8",
+    pulse: "#8fb8ff",
   },
   light: {
     background: "#fbfbfd",
-    edge: "#b9bcc8",
+    edge: "#b4b8c4",
     edgeMuted: "#dcdee6",
     label: "#15151a",
     labelHalo: "rgba(251,251,253,0.86)",
-    signal: "#c9295f",
-    warn: "#b07400",
-    focus: "#15151a",
+    focus: "#101014",
+    pulse: "#2f6fd0",
   },
 };
 

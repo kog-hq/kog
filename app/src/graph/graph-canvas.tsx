@@ -5,8 +5,14 @@ import type { NodeDisplayData, PartialButFor } from "sigma/types";
 import { useEffect, useMemo, useRef } from "react";
 import { createNodeBorderProgram } from "@sigma/node-border";
 import { CursorField } from "./cursor-field";
-import { buildGraph, recolour } from "./build";
-import { canvasTheme, type CanvasTheme, type Theme } from "@/lib/palette";
+import { buildGraph } from "./build";
+import {
+  canvasTheme,
+  languageColour,
+  shadeKey,
+  type CanvasTheme,
+  type Theme,
+} from "@/lib/palette";
 import type { KogProject, ProjectIndex } from "@/lib/kog";
 
 export type LabelMode = "none" | "hubs" | "more" | "all";
@@ -49,12 +55,25 @@ const FIELD_HOLE = 0.34;
 const NodeWithRing = createNodeBorderProgram({
   borders: [
     {
-      color: { attribute: "borderColor", defaultValue: "#888888" },
-      size: { value: 0.22 },
+      color: { attribute: "borderColor", defaultValue: "#00000000" },
+      size: { value: 0.2 },
     },
     { color: { attribute: "color" }, size: { fill: true } },
   ],
 });
+
+/**
+ * Above this many neighbours, a neighbourhood stops labelling all of itself.
+ * `packages/shared-types/src/index.ts` has 232 dependents: forcing 232 names
+ * on screen at once answers "which files" with a grey smear, where the
+ * inspector's list answers it precisely and the graph is left to show shape.
+ */
+const LABEL_ALL_NEIGHBOURS_UP_TO = 40;
+
+/** How far the blast wave travels, in hops, and how fast. */
+const WAVE_DEPTH = 5;
+const WAVE_STEP_MS = 130;
+const WAVE_TAIL_MS = 900;
 
 function prefersReducedMotion(): boolean {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -163,6 +182,7 @@ export function GraphCanvas(props: Props) {
   // times a second to move a highlight by two pixels.
   const reveal = useRef(1);
   const breath = useRef(0);
+  const wave = useRef(-1);
 
   // The layout is the expensive part, so it is tied to what actually changes
   // its shape: the project and whether folders are collapsed. Filters,
@@ -180,13 +200,16 @@ export function GraphCanvas(props: Props) {
   const focus = useMemo(() => {
     const anchor = hovered ?? selected;
     if (!anchor || groupByFolder) return null;
+    const uses = new Set(index.dependencies.get(anchor) ?? []);
+    const usedBy = new Set(index.dependents.get(anchor) ?? []);
     return {
       anchor,
       // What this file uses, and what uses it. Direction is the whole
       // question a dependency graph answers, so the two are drawn
       // differently rather than merged into one blob of "related".
-      uses: new Set(index.dependencies.get(anchor) ?? []),
-      usedBy: new Set(index.dependents.get(anchor) ?? []),
+      uses,
+      usedBy,
+      nameThem: uses.size + usedBy.size <= LABEL_ALL_NEIGHBOURS_UP_TO,
     };
   }, [hovered, selected, index, groupByFolder]);
 
@@ -223,7 +246,10 @@ export function GraphCanvas(props: Props) {
       sigma.current = null;
       field.current = null;
     };
-  }, [graph, theme, onSelect, onHover]);
+    // Deliberately not keyed on the theme: colours are decided in the
+    // reducers, so a theme change is a repaint and never a rebuild.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [graph, onSelect, onHover]);
 
   /**
    * The graph parts under the pointer, and closes behind it.
@@ -334,35 +360,127 @@ export function GraphCanvas(props: Props) {
     return () => cancelAnimationFrame(raf);
   }, [focus]);
 
-  // Filtering, selection, hover and colour mode are all one repaint: sigma
-  // asks these reducers what each node and edge looks like right now.
+  /**
+   * How many hops each file is from the selection, following the arrows
+   * *into* it: the set that breaks if this file changes.
+   */
+  const blast = useMemo(() => {
+    if (!selected || groupByFolder) return null;
+    const depth = new Map<string, number>([[selected, 0]]);
+    let frontier = [selected];
+    for (let hop = 1; hop <= WAVE_DEPTH && frontier.length > 0; hop++) {
+      const next: string[] = [];
+      for (const node of frontier) {
+        for (const dependent of index.dependents.get(node) ?? []) {
+          if (depth.has(dependent)) continue;
+          depth.set(dependent, hop);
+          next.push(dependent);
+        }
+      }
+      frontier = next;
+    }
+    return depth;
+  }, [selected, index, groupByFolder]);
+
+  /**
+   * The wave itself: a ripple that leaves the selected file and runs
+   * outwards through everything that depends on it, one hop at a time.
+   *
+   * This is the product's own question drawn as motion — *what breaks if I
+   * change this?* — and it answers it in the order the breakage would
+   * actually propagate. It runs once per selection and then stops.
+   */
+  useEffect(() => {
+    if (!blast || prefersReducedMotion()) {
+      wave.current = -1;
+      return;
+    }
+    const started = performance.now();
+    const span = WAVE_DEPTH * WAVE_STEP_MS + WAVE_TAIL_MS;
+    let raf = 0;
+    const step = () => {
+      const elapsed = performance.now() - started;
+      wave.current = elapsed;
+      sigma.current?.refresh({ skipIndexation: true });
+      if (elapsed < span) raf = requestAnimationFrame(step);
+      else wave.current = -1;
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [blast]);
+
+  // Filtering, selection, hover and the wave are all one repaint: sigma asks
+  // these reducers what each node and edge looks like right now.
   useEffect(() => {
     const renderer = sigma.current;
     if (!renderer) return;
     const canvas = canvasTheme(theme);
-    recolour(graph, theme);
+
+    /** How brightly the wave is passing through a node right now. */
+    const crest = (node: string): number => {
+      if (!blast || wave.current < 0) return 0;
+      const hop = blast.get(node);
+      if (hop === undefined || hop === 0) return 0;
+      const distance = wave.current - hop * WAVE_STEP_MS;
+      if (distance < 0) return 0;
+      // A crest that rises fast and falls away slowly, so the wave reads as
+      // travelling rather than as a row of lights switching on.
+      return Math.max(0, Math.exp(-distance / 320) - 0.04);
+    };
+
+    /** Blend towards the wave colour, in place of a second palette. */
+    const lit = (hex: string, amount: number): string => {
+      if (amount <= 0) return hex;
+      const from = Number.parseInt(hex.slice(1), 16);
+      const to = Number.parseInt(canvas.pulse.slice(1), 16);
+      const mix = (shift: number) => {
+        const a = (from >> shift) & 0xff;
+        const b = (to >> shift) & 0xff;
+        return Math.round(a + (b - a) * amount)
+          .toString(16)
+          .padStart(2, "0");
+      };
+      return `#${mix(16)}${mix(8)}${mix(0)}`;
+    };
 
     renderer.setSetting("nodeReducer", (node, data) => {
       if (visible && !visible.has(node)) return { ...data, hidden: true };
       const size = data.size * reveal.current;
+      // Colour is computed here rather than stored on the node, so the
+      // theme can never be one repaint behind: there is no cached attribute
+      // to go stale.
+      const fill = languageColour(
+        data.lang as string,
+        data.kind === "asset",
+        theme,
+        shadeKey(node),
+      );
+      const glow = crest(node);
 
       if (node === selected) {
         // The fill still says which language: a selection that repainted the
         // node would hide the one thing colour is for.
         return {
           ...data,
+          color: fill,
           borderColor: canvas.focus,
           size: size * (1.4 + breath.current * 0.1),
-          zIndex: 3,
+          zIndex: 4,
           forceLabel: true,
         };
       }
       if (focus) {
         if (node === focus.anchor) {
-          return { ...data, size: size * 1.3, zIndex: 3, forceLabel: true };
+          return { ...data, color: fill, size: size * 1.3, zIndex: 3, forceLabel: true };
         }
         if (focus.uses.has(node) || focus.usedBy.has(node)) {
-          return { ...data, size, zIndex: 2, forceLabel: true };
+          return {
+            ...data,
+            color: lit(fill, glow),
+            size,
+            zIndex: 2,
+            forceLabel: focus.nameThem,
+          };
         }
         // Dimmed and shrunk rather than hidden: the shape of the whole is
         // the context that makes a neighbourhood mean anything, but it has
@@ -375,7 +493,10 @@ export function GraphCanvas(props: Props) {
           zIndex: 0,
         };
       }
-      return { ...data, size };
+      if (glow > 0) {
+        return { ...data, color: lit(fill, glow), size: size * (1 + glow * 0.5), zIndex: 2 };
+      }
+      return { ...data, color: fill, size };
     });
 
     renderer.setSetting("edgeReducer", (edge, data) => {
@@ -417,7 +538,7 @@ export function GraphCanvas(props: Props) {
     );
     renderer.setSetting("defaultEdgeColor", canvas.edgeMuted);
     renderer.refresh();
-  }, [graph, index, visible, selected, focus, theme]);
+  }, [graph, index, visible, selected, focus, blast, theme]);
 
   useEffect(() => {
     const renderer = sigma.current;

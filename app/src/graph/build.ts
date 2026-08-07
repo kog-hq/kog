@@ -11,24 +11,12 @@ import Graph from "graphology";
 import forceAtlas2 from "graphology-layout-forceatlas2";
 import type { KogProject, NodeKind, ProjectIndex } from "@/lib/kog";
 import { dirName } from "@/lib/kog";
-import {
-  canvasTheme,
-  languageColour,
-  shadeKey,
-  type CanvasTheme,
-  type Theme,
-} from "@/lib/palette";
-
-/** What is true about a file, drawn as a ring rather than as a fill. */
-export type NodeState = "fine" | "gap" | "unread";
+import { languageColour, shadeKey, type Theme } from "@/lib/palette";
 
 export type NodeAttributes = {
   label: string;
   size: number;
   color: string;
-  /** The ring. Equal to `color` when there is nothing to say. */
-  borderColor: string;
-  state: NodeState;
   kind: NodeKind;
   lang: string;
   /** Files behind this node: one, unless folders are collapsed. */
@@ -36,27 +24,6 @@ export type NodeAttributes = {
   x: number;
   y: number;
 };
-
-export function stateOf(
-  id: string,
-  kind: NodeKind,
-  index: ProjectIndex,
-): NodeState {
-  if (kind === "unread_source") return "unread";
-  if (kind === "asset") return "fine";
-  return index.diagnosticsByFile.has(id) ? "gap" : "fine";
-}
-
-/** The ring colour, or the fill when the file has nothing to report. */
-export function ringOf(
-  state: NodeState,
-  fill: string,
-  theme: CanvasTheme,
-): string {
-  if (state === "unread") return theme.signal;
-  if (state === "gap") return theme.warn;
-  return fill;
-}
 
 function sizeFor(degree: number, kind: NodeKind): number {
   const base = 2.6 + Math.sqrt(degree) * 1.7;
@@ -80,23 +47,14 @@ export function buildGraph(
   options: BuildOptions,
 ): Graph {
   const graph = new Graph({ type: "directed", multi: false });
-  const canvas = canvasTheme(theme);
 
-  const add = (
-    id: string,
-    label: string,
-    lang: string,
-    kind: NodeKind,
-    state: NodeState,
-    members: string[],
-  ) => {
-    const fill = languageColour(lang, kind === "asset", theme, shadeKey(id));
+  const add = (id: string, label: string, lang: string, kind: NodeKind, members: string[]) => {
     graph.addNode(id, {
       label,
       size: 2,
-      color: fill,
-      borderColor: ringOf(state, fill, canvas),
-      state,
+      // The first paint only. From then on the reducer decides, so a theme
+      // change never has to reach back into these attributes.
+      color: languageColour(lang, kind === "asset", theme, shadeKey(id)),
       kind,
       lang,
       members,
@@ -114,19 +72,8 @@ export function buildGraph(
       else members.set(folder, [node.id]);
     }
     for (const [folder, files] of members) {
-      // A folder takes the state of its worst file — one unread file in a
-      // package is what the reader needs to see, not the nine that are fine —
-      // and the language of whatever it mostly holds.
-      const states = files.map((id) => {
-        const node = index.byId.get(id);
-        return node ? stateOf(id, node.kind, index) : "fine";
-      });
-      const state: NodeState = states.includes("unread")
-        ? "unread"
-        : states.includes("gap")
-          ? "gap"
-          : "fine";
-
+      // A folder takes the language of whatever it mostly holds — the one
+      // thing about a package you can read from across the room.
       const langs = new Map<string, number>();
       let kind: NodeKind = "asset";
       for (const id of files) {
@@ -134,12 +81,10 @@ export function buildGraph(
         if (!node) continue;
         langs.set(node.lang, (langs.get(node.lang) ?? 0) + 1);
         if (node.kind === "source") kind = "source";
-        else if (node.kind === "unread_source" && kind === "asset")
-          kind = "unread_source";
+        else if (node.kind === "unread_source" && kind === "asset") kind = "unread_source";
       }
-      const lang =
-        [...langs.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "";
-      add(folder, folder, lang, kind, state, files);
+      const lang = [...langs.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "";
+      add(folder, folder, lang, kind, files);
     }
     for (const edge of project.graph.edges) {
       const from = dirName(edge.source);
@@ -149,14 +94,7 @@ export function buildGraph(
     }
   } else {
     for (const node of project.graph.nodes) {
-      add(
-        node.id,
-        index.label.get(node.id) ?? node.id,
-        node.lang,
-        node.kind,
-        stateOf(node.id, node.kind, index),
-        [node.id],
-      );
+      add(node.id, index.label.get(node.id) ?? node.id, node.lang, node.kind, [node.id]);
     }
     for (const edge of project.graph.edges) {
       if (graph.hasNode(edge.source) && graph.hasNode(edge.target)) {
@@ -190,21 +128,3 @@ export function buildGraph(
   return graph;
 }
 
-/** Recolour in place: a theme change never relayouts, and never jumps. */
-export function recolour(graph: Graph, theme: Theme): void {
-  const canvas = canvasTheme(theme);
-  graph.forEachNode((node, attributes) => {
-    const fill = languageColour(
-      attributes.lang as string,
-      (attributes.kind as NodeKind) === "asset",
-      theme,
-      shadeKey(node),
-    );
-    graph.setNodeAttribute(node, "color", fill);
-    graph.setNodeAttribute(
-      node,
-      "borderColor",
-      ringOf(attributes.state as NodeState, fill, canvas),
-    );
-  });
-}

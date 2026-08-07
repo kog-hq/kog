@@ -15,7 +15,13 @@ const IMPORT_QUERY: &str = r#"
 "#;
 
 /// Extension probes, in order, for a specifier that has none.
-const EXTENSION_ORDER: &[&str] = &["ts", "tsx", "js", "jsx", "mts", "cts"];
+///
+/// `d.ts` comes last on purpose: it is a declaration file, so a real
+/// `types.ts` beside a `types.d.ts` must win. It has to be here at all
+/// because a module can exist *only* as a declaration — TanStack Query's
+/// Vue examples import `./types`, which is `types.d.ts` on disk, and
+/// leaving it out reported ten real imports as broken across the repository.
+const EXTENSION_ORDER: &[&str] = &["ts", "tsx", "js", "jsx", "mts", "cts", "d.ts"];
 
 /// Directory index probes, in order. Narrower than `EXTENSION_ORDER` on
 /// purpose: design doc §6 specifies `<dir>/index.{ts,tsx,js,jsx}` for the
@@ -407,8 +413,25 @@ impl Extractor for TypeScriptExtractor {
         "typescript"
     }
 
+    /// One extractor, two languages. TypeScript and JavaScript share an
+    /// import syntax and a resolver — including the `.js`-specifier-names-a
+    /// `.ts`-file rule that makes a single grammar the right choice — but a
+    /// `.js` file is not a TypeScript file, and per-language statistics that
+    /// said so would report every JavaScript project as a TypeScript one.
+    fn lang_for(&self, path: &Path) -> &'static str {
+        let extension = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        match extension.as_str() {
+            "js" | "jsx" | "mjs" | "cjs" => "javascript",
+            _ => "typescript",
+        }
+    }
+
     fn extensions(&self) -> &'static [&'static str] {
-        &["ts", "tsx", "js", "jsx", "mts", "cts"]
+        &["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"]
     }
 
     fn extract(&self, source: &str) -> Result<Vec<Specifier>, ExtractError> {
@@ -536,6 +559,33 @@ impl Extractor for TypeScriptExtractor {
 
     fn skipped_configs(&self) -> &[SkippedConfig] {
         self.tsconfig.skipped()
+    }
+}
+
+/// A shared TypeScript extractor.
+///
+/// Two front ends need the same one: TypeScript itself, and the single-file
+/// component extractor that delegates every resolution to it. Building two
+/// would walk the project twice for `tsconfig` files and workspace packages,
+/// and leave two indexes free to drift apart.
+impl Extractor for std::sync::Arc<TypeScriptExtractor> {
+    fn lang(&self) -> &'static str {
+        (**self).lang()
+    }
+    fn lang_for(&self, path: &Path) -> &'static str {
+        (**self).lang_for(path)
+    }
+    fn extensions(&self) -> &'static [&'static str] {
+        (**self).extensions()
+    }
+    fn extract(&self, source: &str) -> Result<Vec<Specifier>, ExtractError> {
+        (**self).extract(source)
+    }
+    fn resolve(&self, raw: &str, importer: &Path) -> Resolution {
+        (**self).resolve(raw, importer)
+    }
+    fn skipped_configs(&self) -> &[SkippedConfig] {
+        (**self).skipped_configs()
     }
 }
 
@@ -907,7 +957,63 @@ export * from "./barrel";"#,
         let dir = TempDir::new().unwrap();
         let e = TypeScriptExtractor::new(dir.path());
         assert_eq!(e.lang(), "typescript");
-        assert_eq!(e.extensions(), &["ts", "tsx", "js", "jsx", "mts", "cts"]);
+        assert_eq!(
+            e.extensions(),
+            &["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"]
+        );
+    }
+
+    /// One grammar, one resolver, two languages: a `.js` file must be
+    /// labelled JavaScript or every JavaScript project in the per-language
+    /// table reads as a TypeScript one.
+    #[test]
+    fn javascript_files_are_labelled_javascript_not_typescript() {
+        let dir = TempDir::new().unwrap();
+        let e = TypeScriptExtractor::new(dir.path());
+        assert_eq!(e.lang_for(Path::new("src/a.ts")), "typescript");
+        assert_eq!(e.lang_for(Path::new("src/a.tsx")), "typescript");
+        assert_eq!(e.lang_for(Path::new("src/a.js")), "javascript");
+        assert_eq!(e.lang_for(Path::new("src/a.jsx")), "javascript");
+        assert_eq!(e.lang_for(Path::new("src/a.mjs")), "javascript");
+        assert_eq!(e.lang_for(Path::new("src/a.cjs")), "javascript");
+    }
+
+    /// A module that exists only as a declaration file. Found on
+    /// TanStack Query, whose Vue examples import `./types` where the file
+    /// on disk is `types.d.ts`.
+    #[test]
+    fn a_specifier_naming_a_declaration_only_module_resolves() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join("src")).unwrap();
+        fs::write(dir.path().join("src/types.d.ts"), "export type A = 1;").unwrap();
+        fs::write(dir.path().join("src/app.ts"), "").unwrap();
+        let e = TypeScriptExtractor::new(dir.path());
+        let importer = dir.path().canonicalize().unwrap().join("src/app.ts");
+
+        let resolution = e.resolve("./types", &importer);
+        assert!(
+            matches!(resolution, Resolution::Internal(ref p) if p.ends_with("types.d.ts")),
+            "got {resolution:?}"
+        );
+    }
+
+    /// A real module beside its own declaration file must win: the source
+    /// is what the graph is about.
+    #[test]
+    fn a_real_module_wins_over_its_declaration_file() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join("src")).unwrap();
+        fs::write(dir.path().join("src/types.ts"), "export const a = 1;").unwrap();
+        fs::write(dir.path().join("src/types.d.ts"), "export type A = 1;").unwrap();
+        fs::write(dir.path().join("src/app.ts"), "").unwrap();
+        let e = TypeScriptExtractor::new(dir.path());
+        let importer = dir.path().canonicalize().unwrap().join("src/app.ts");
+
+        let resolution = e.resolve("./types", &importer);
+        assert!(
+            matches!(resolution, Resolution::Internal(ref p) if p.ends_with("src/types.ts")),
+            "got {resolution:?}"
+        );
     }
 
     // --- Resolution rule 3: workspace packages (design doc §6) ---

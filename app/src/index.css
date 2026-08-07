@@ -1,0 +1,212 @@
+@import "tailwindcss";
+@import "@fontsource-variable/jetbrains-mono";
+
+/*
+ * The chrome around the map: quiet, so the map is the loud thing.
+ *
+ * Node colours live in `lib/palette.ts` — a canvas is painted by the
+ * renderer, not by CSS, and splitting them across both is how a theme change
+ * ends up half applied. What is here is the interface: surfaces, borders,
+ * text, and the two accents it shares with the canvas.
+ *
+ *   signal  (#E0457B)  what KOG could not read, or could not resolve
+ *   focus   (#4A90D9)  what you are inspecting right now
+ *
+ * The variable names are shadcn/ui's contract, filled with KOG's values — so
+ * its components work untouched and still look like this project.
+ */
+
+@theme {
+  --font-mono:
+    "JetBrains Mono Variable", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-sans: var(--font-mono);
+
+  /* The two signals. Identical in both themes: a gap is a gap. */
+  --color-signal: #e0457b;
+  --color-signal-soft: color-mix(in srgb, #e0457b 16%, transparent);
+  --color-focus: #4a90d9;
+  --color-focus-soft: color-mix(in srgb, #4a90d9 16%, transparent);
+}
+
+/* --- Dark, the default: a graph is a light-on-dark instrument ------------ */
+:root {
+  --radius: 0.5rem;
+
+  --background: #0d0d0f;
+  --foreground: #e8e8ea;
+  --card: #141519;
+  --card-foreground: #e8e8ea;
+  --popover: #16171b;
+  --popover-foreground: #e8e8ea;
+  --primary: #e8e8ea;
+  --primary-foreground: #0d0d0f;
+  --secondary: #1c1d22;
+  --secondary-foreground: #e8e8ea;
+  --muted: #1c1d22;
+  --muted-foreground: #8b8d96;
+  --accent: #22232a;
+  --accent-foreground: #e8e8ea;
+  --destructive: #e0457b;
+  --border: #26272e;
+  --input: #2c2d35;
+  --ring: #4a90d9;
+
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  --background: #fbfbfd;
+  --foreground: #15151a;
+  --card: #ffffff;
+  --card-foreground: #15151a;
+  --popover: #ffffff;
+  --popover-foreground: #15151a;
+  --primary: #15151a;
+  --primary-foreground: #fbfbfd;
+  --secondary: #f1f1f5;
+  --secondary-foreground: #15151a;
+  --muted: #f1f1f5;
+  --muted-foreground: #6f7079;
+  --accent: #eaeaf0;
+  --accent-foreground: #15151a;
+  --destructive: #c9295f;
+  --border: #e4e4ea;
+  --input: #d8d8e0;
+  --ring: #4a90d9;
+
+  color-scheme: light;
+}
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-mono);
+    font-size: 13px;
+    /* Tabular figures: every number here is meant to be compared with the
+       one above it. */
+    font-variant-numeric: tabular-nums;
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+  }
+
+  /* Keyboard focus stays visible everywhere: this interface is meant to be
+     driven from the keyboard. */
+  :focus-visible {
+    outline: 2px solid var(--color-focus);
+    outline-offset: 1px;
+  }
+
+  ::selection {
+    background: var(--color-focus-soft);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+@layer utilities {
+  /* Panels sit over a canvas that runs edge to edge. Opaque, not frosted:
+     on a graph this dense a blur turns everything behind the panel to soup,
+     and reading over it for an hour is tiring. A crisp edge and a shadow
+     separate better than translucency does. */
+  .surface {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow:
+      0 1px 2px rgb(0 0 0 / 0.05),
+      0 10px 30px -12px rgb(0 0 0 / 0.22);
+  }
+
+  :root[data-theme="dark"] .surface {
+    box-shadow:
+      0 1px 2px rgb(0 0 0 / 0.5),
+      0 14px 36px -14px rgb(0 0 0 / 0.8);
+  }
+
+  /* The inspector arrives from the edge it lives on. */
+  .slide-in {
+    animation: slide-in 220ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  @keyframes slide-in {
+    from {
+      opacity: 0;
+      transform: translateX(12px);
+    }
+  }
+
+  /* One label style, used for every section heading and column header. */
+  .eyebrow {
+    font-size: 10px;
+    line-height: 1;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted-foreground);
+  }
+
+  .num {
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+  }
+
+  /* A list row that answers on hover without shifting anything. */
+  .row {
+    transition:
+      background-color 140ms ease,
+      color 140ms ease;
+  }
+
+  .row:hover {
+    background: var(--accent);
+  }
+
+  .scrollbar-slim {
+    scrollbar-width: thin;
+    scrollbar-color: var(--input) transparent;
+  }
+}

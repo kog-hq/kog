@@ -1,17 +1,142 @@
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 /// Directories that are never source, whatever `.gitignore` says.
-const ALWAYS_SKIP: &[&str] = &[
+///
+/// Entries are matched by directory name at any depth. Each one is either
+/// dependency code that is not the project's own (`node_modules`, `vendor`,
+/// `Pods`, `.venv`), build output (`target`, `dist`, `build`, `.next`,
+/// `.turbo`, `__pycache__`), or tooling state (`.git`, `coverage`). A file
+/// under any of them is never a node, and an import that resolves into one
+/// is reported as [`crate::ExclusionReason::SkippedDirectory`] rather than
+/// silently dropped.
+pub const ALWAYS_SKIP: &[&str] = &[
+    // JavaScript / general
     "node_modules",
+    "bower_components",
+    ".yarn",
+    ".pnpm-store",
+    // Build output
     "target",
     "dist",
     "build",
+    "out",
     ".next",
+    ".nuxt",
+    ".svelte-kit",
     ".turbo",
+    ".output",
+    ".parcel-cache",
+    "bazel-out",
+    "cmake-build-debug",
+    "cmake-build-release",
+    // Language toolchain state
+    "__pycache__",
+    ".venv",
+    "venv",
+    ".tox",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".gradle",
+    ".dart_tool",
+    ".bundle",
+    "Pods",
+    "Carthage",
+    "DerivedData",
+    // Version control and tooling
     ".git",
+    ".hg",
+    ".svn",
     "vendor",
     "coverage",
+    ".terraform",
 ];
+
+/// Whether any component of `path` is a directory this walker never enters.
+///
+/// Used to explain an exclusion after the fact: a file that exists on disk
+/// but never became a node was either refused by this list or by an ignore
+/// rule, and this is what tells the two apart.
+pub fn is_in_skipped_directory(path: &Path) -> bool {
+    path.components()
+        .filter_map(|c| c.as_os_str().to_str())
+        .any(|name| ALWAYS_SKIP.contains(&name))
+}
+
+/// Every file under `root` the walker visited, whatever its extension, plus
+/// the directories it refused to enter.
+///
+/// One walk answers both questions the graph needs: which files are
+/// candidates for an extractor, and which files exist but are not — the
+/// second being what makes the coverage report possible at all. Walking
+/// twice (once per extension set, once for everything) would double the
+/// cost on a large repository and risk the two disagreeing.
+#[derive(Debug, Default)]
+pub struct Survey {
+    /// Absolute paths, sorted, so two runs on an unchanged tree agree.
+    pub files: Vec<PathBuf>,
+    /// Directories refused by [`ALWAYS_SKIP`], counted by name. Ignore-rule
+    /// exclusions are absent by construction: a `.gitignore`d directory is
+    /// never handed to the filter at all, so it cannot be counted here
+    /// without a second, far more expensive walk.
+    pub skipped_directories: BTreeMap<String, usize>,
+}
+
+/// Walk `root` once, collecting every visited file and every refused
+/// directory. Returns an empty survey for an unreadable or missing root,
+/// like [`discover`].
+pub fn survey(root: &Path) -> Survey {
+    let root = match root.canonicalize() {
+        Ok(canonical) => canonical,
+        Err(_) => return Survey::default(),
+    };
+
+    // `filter_entry` takes an `Fn`, so the tally needs interior mutability.
+    // The walk here is single-threaded (`WalkBuilder::build`, not
+    // `build_parallel`), so the lock is never contended.
+    let skipped: Arc<Mutex<BTreeMap<String, usize>>> = Arc::default();
+    let tally = Arc::clone(&skipped);
+
+    let mut builder = ignore::WalkBuilder::new(&root);
+    builder.hidden(false).git_ignore(true).require_git(false);
+    builder.filter_entry(move |entry| {
+        let Some(name) = entry.file_name().to_str() else {
+            return true;
+        };
+        if !ALWAYS_SKIP.contains(&name) {
+            return true;
+        }
+        // Count only directories: a *file* called `build` is not a skipped
+        // directory, and reporting it as one would be a lie in the table.
+        if entry.file_type().is_some_and(|t| t.is_dir()) {
+            *tally
+                .lock()
+                .expect("skip tally")
+                .entry(name.to_string())
+                .or_insert(0) += 1;
+        }
+        false
+    });
+
+    let mut files: Vec<PathBuf> = builder
+        .build()
+        .flatten()
+        .filter(|e| e.file_type().is_some_and(|t| t.is_file()))
+        .map(|e| e.into_path())
+        .collect();
+    files.sort();
+
+    // The builder still owns the closure that holds the other `Arc`, so the
+    // tally is cloned out rather than unwrapped: `Arc::try_unwrap` would
+    // fail here and silently yield an empty table.
+    let skipped_directories = skipped.lock().expect("skip tally").clone();
+    Survey {
+        files,
+        skipped_directories,
+    }
+}
 
 /// Build a walker that respects `.gitignore` and skips build directories.
 ///
@@ -205,5 +330,52 @@ mod tests {
     fn a_missing_root_yields_nothing_rather_than_panicking() {
         let found = discover(std::path::Path::new("/definitely/not/a/real/path"), &["ts"]);
         assert!(found.is_empty());
+    }
+
+    #[test]
+    fn a_survey_keeps_every_extension_not_just_the_source_ones() {
+        let dir = TempDir::new().unwrap();
+        write(&dir, "src/a.ts", "");
+        write(&dir, "README.md", "");
+        write(&dir, "logo.png", "");
+        let survey = survey(dir.path());
+        assert_eq!(survey.files.len(), 3, "a survey is not extension-filtered");
+    }
+
+    #[test]
+    fn a_survey_counts_the_directories_it_refused_by_name() {
+        let dir = TempDir::new().unwrap();
+        write(&dir, "src/a.ts", "");
+        write(&dir, "node_modules/pkg/index.ts", "");
+        write(&dir, "packages/x/node_modules/dep/index.ts", "");
+        write(&dir, "dist/bundle.js", "");
+        let survey = survey(dir.path());
+        assert_eq!(survey.files.len(), 1, "only src/a.ts is visited");
+        assert_eq!(survey.skipped_directories.get("node_modules"), Some(&2));
+        assert_eq!(survey.skipped_directories.get("dist"), Some(&1));
+    }
+
+    /// A *file* named `build` is not a build directory. Counting it as one
+    /// would put a fiction in the coverage table.
+    #[test]
+    fn a_file_sharing_a_skipped_directorys_name_is_not_counted_as_one() {
+        let dir = TempDir::new().unwrap();
+        write(&dir, "build", "#!/bin/sh\n");
+        let survey = survey(dir.path());
+        assert!(survey.skipped_directories.is_empty());
+    }
+
+    #[test]
+    fn a_skipped_directory_is_recognised_at_any_depth() {
+        assert!(is_in_skipped_directory(Path::new("a/node_modules/b/c.ts")));
+        assert!(is_in_skipped_directory(Path::new("dist/x.js")));
+        assert!(!is_in_skipped_directory(Path::new("src/builder/x.ts")));
+    }
+
+    #[test]
+    fn a_survey_of_a_missing_root_yields_nothing_rather_than_panicking() {
+        let survey = survey(std::path::Path::new("/definitely/not/a/real/path"));
+        assert!(survey.files.is_empty());
+        assert!(survey.skipped_directories.is_empty());
     }
 }

@@ -1,3 +1,24 @@
+pub mod clike;
+pub mod csharp;
+pub mod go;
+pub mod jvm;
+pub mod markup;
+pub mod python;
+pub mod rust;
+pub mod scripting;
+pub mod sfc;
+pub mod shell;
+pub mod support;
 pub mod typescript;
 
+pub use clike::CLikeExtractor;
+pub use csharp::CSharpExtractor;
+pub use go::GoExtractor;
+pub use jvm::JavaExtractor;
+pub use markup::{CssExtractor, HtmlExtractor};
+pub use python::PythonExtractor;
+pub use rust::RustExtractor;
+pub use scripting::{PhpExtractor, RubyExtractor};
+pub use sfc::SfcExtractor;
+pub use shell::ShellExtractor;
 pub use typescript::TypeScriptExtractor;

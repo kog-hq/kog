@@ -1,8 +1,12 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use clap::{Parser, Subcommand};
-use kog_graph::{build_graph, Graph, TypeScriptExtractor};
+use kog_graph::{
+    render, scan_workspace, Answer, Atlas, FileStatus, Project, Question, Workspace, DEFAULT_LIMIT,
+    QUESTION_FORMS,
+};
 use std::path::PathBuf;
 
+mod mcp;
 mod server;
 
 #[derive(Parser)]
@@ -38,6 +42,38 @@ enum Command {
         #[arg(default_value = ".")]
         root: PathBuf,
     },
+    /// Ask the graph a question, in words.
+    ///
+    /// Shares its entire implementation with the MCP server: two
+    /// implementations of "what depends on this?" would eventually disagree,
+    /// and only one of them would be measured.
+    Query {
+        /// The question. One of:
+        /// "what depends on <path>", "what does <path> depend on",
+        /// "blast radius of <path>", "files touching <package>", "summary".
+        question: String,
+        /// Project root to scan. Defaults to the current directory.
+        #[arg(long, default_value = ".")]
+        root: PathBuf,
+        /// How many file names to list. The total is always reported in full.
+        #[arg(long)]
+        limit: Option<usize>,
+        /// How many hops a blast radius walks.
+        #[arg(long)]
+        depth: Option<usize>,
+        /// Print the answer as JSON instead of prose.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Serve the graph to an agent over MCP, on stdin and stdout.
+    ///
+    /// Scans once at startup, then answers until the stream closes. Progress
+    /// goes to stderr; stdout carries protocol messages and nothing else.
+    Mcp {
+        /// Project root to scan. Defaults to the current directory.
+        #[arg(default_value = ".")]
+        root: PathBuf,
+    },
 }
 
 fn main() -> Result<()> {
@@ -51,6 +87,14 @@ fn main() -> Result<()> {
     match command {
         Command::Scan { root, output } => scan(root, output),
         Command::View { root } => view(root),
+        Command::Query {
+            question,
+            root,
+            limit,
+            depth,
+            json,
+        } => query(root, &question, limit, depth, json),
+        Command::Mcp { root } => mcp::serve(&canonicalize_root(root)?),
     }
 }
 
@@ -65,19 +109,24 @@ fn canonicalize_root(root: PathBuf) -> Result<PathBuf> {
         .with_context(|| format!("cannot canonicalize {}", root.display()))
 }
 
-fn scan_root(root: &std::path::Path) -> Graph {
-    let extractor = TypeScriptExtractor::new(root);
-    build_graph(root, &extractor)
-}
-
-fn scan(root: PathBuf, output: Option<PathBuf>) -> Result<()> {
-    let root = canonicalize_root(root)?;
-    let graph = scan_root(&root);
+/// Print one project's numbers: what was read, what resolved, and — just
+/// as loudly — what was not read at all.
+fn print_project(project: &Project, labelled: bool) {
+    let graph = &project.graph;
     let stats = &graph.stats;
+    let coverage = &stats.coverage;
 
-    println!("root                   {}", root.display());
-    println!("files discovered       {}", stats.files_discovered);
-    println!("files parsed           {}", stats.files_parsed);
+    if labelled {
+        let kinds: Vec<String> = project.kinds.iter().map(|k| k.to_string()).collect();
+        println!();
+        println!("── {}  ({})", project.id, kinds.join(", "));
+    }
+
+    println!("files seen             {}", coverage.files_seen);
+    println!("  analysed             {}", coverage.files_analysed);
+    println!("  unsupported          {}", coverage.files_unsupported);
+    println!("  not source           {}", coverage.files_not_source);
+    println!("source coverage        {:.4}", coverage.source_coverage());
     println!("specifiers total       {}", stats.specifiers_total);
     println!("  internal             {}", stats.specifiers_internal);
     println!("    resolved           {}", stats.resolved);
@@ -90,6 +139,42 @@ fn scan(root: PathBuf, output: Option<PathBuf>) -> Result<()> {
     println!("nodes                  {}", graph.nodes.len());
     println!("edges                  {}", graph.edges.len());
     println!("resolution rate        {:.4}", stats.resolution_rate);
+
+    // A language ships when it passes its own gate, so every language
+    // publishes its own rate — an aggregate can hide a broken resolver
+    // behind a majority language that works.
+    for (lang, lang_stats) in &stats.by_lang {
+        println!(
+            "  {:<20} {:.4}  ({} files, {} edges)",
+            lang, lang_stats.resolution_rate, lang_stats.files, lang_stats.edges
+        );
+    }
+
+    // The gap list: source files KOG saw and could not read. This is the
+    // number that stops a one-language tool from scoring 1.0000 on a
+    // polyglot repository.
+    let gaps: Vec<&kog_graph::ExtensionCoverage> = coverage
+        .extensions
+        .iter()
+        .filter(|e| e.status == FileStatus::UnsupportedLanguage)
+        .collect();
+    if !gaps.is_empty() {
+        println!(
+            "not read               {} files",
+            coverage.files_unsupported
+        );
+        for gap in gaps.iter().take(10) {
+            println!(
+                "  {:<19} {:>6}  {}",
+                gap.label,
+                gap.count,
+                gap.lang.as_deref().unwrap_or("unrecognised")
+            );
+        }
+        if gaps.len() > 10 {
+            println!("  … {} more extensions", gaps.len() - 10);
+        }
+    }
 
     if !stats.failures.is_empty() {
         println!("failures               {}", stats.failures.len());
@@ -118,17 +203,59 @@ fn scan(root: PathBuf, output: Option<PathBuf>) -> Result<()> {
         }
         for diagnostic in stats.diagnostics.iter().take(10) {
             println!(
-                "  {}:{} [{}] {}",
-                diagnostic.path, diagnostic.line, diagnostic.kind, diagnostic.specifier
+                "  {}:{} [{}: {}] {}",
+                diagnostic.path,
+                diagnostic.line,
+                diagnostic.kind,
+                diagnostic.reason,
+                diagnostic.specifier
             );
         }
         if stats.diagnostics.len() > 10 {
             println!("  … {} more", stats.diagnostics.len() - 10);
         }
     }
+}
+
+fn print_workspace(workspace: &Workspace) {
+    println!("root                   {}", workspace.root);
+    if workspace.split {
+        println!(
+            "projects               {} (the scanned directory contains projects rather than being one)",
+            workspace.projects.len()
+        );
+    }
+
+    for project in &workspace.projects {
+        print_project(project, workspace.split);
+    }
+
+    if workspace.split {
+        let totals = &workspace.totals;
+        println!();
+        println!("── all {} projects", totals.projects);
+        println!("nodes                  {}", totals.nodes);
+        println!("edges                  {}", totals.edges);
+        println!("files analysed         {}", totals.files_analysed);
+        println!("files not read         {}", totals.files_unsupported);
+        println!("source coverage        {:.4}", totals.source_coverage);
+        println!("resolution rate        {:.4}", totals.resolution_rate);
+        if workspace.unassigned_files > 0 {
+            println!(
+                "unassigned files       {} (under the root, inside no project)",
+                workspace.unassigned_files
+            );
+        }
+    }
+}
+
+fn scan(root: PathBuf, output: Option<PathBuf>) -> Result<()> {
+    let root = canonicalize_root(root)?;
+    let workspace = scan_workspace(&root);
+    print_workspace(&workspace);
 
     if let Some(output) = output {
-        let json = serde_json::to_string_pretty(&graph)?;
+        let json = serde_json::to_string_pretty(&workspace)?;
         std::fs::write(&output, json)
             .with_context(|| format!("cannot write {}", output.display()))?;
         println!("written                {}", output.display());
@@ -141,8 +268,8 @@ fn scan(root: PathBuf, output: Option<PathBuf>) -> Result<()> {
 /// OS-assigned free port. Never writes a file.
 fn view(root: PathBuf) -> Result<()> {
     let root = canonicalize_root(root)?;
-    let graph = scan_root(&root);
-    let graph_json = serde_json::to_string(&graph)?;
+    let workspace = scan_workspace(&root);
+    let graph_json = serde_json::to_string(&workspace)?;
 
     // Port 0 asks the OS for whatever's free; a hardcoded 4173/5173 could
     // already be in use. 127.0.0.1 only — this serves the user's
@@ -156,9 +283,10 @@ fn view(root: PathBuf) -> Result<()> {
     let url = format!("http://127.0.0.1:{port}");
 
     println!(
-        "{} nodes, {} edges from {}",
-        graph.nodes.len(),
-        graph.edges.len(),
+        "{} nodes, {} edges across {} project(s) from {}",
+        workspace.totals.nodes,
+        workspace.totals.edges,
+        workspace.totals.projects,
         root.display()
     );
     // Printed before opening the browser: this is the one line that still
@@ -176,6 +304,57 @@ fn view(root: PathBuf) -> Result<()> {
         }
     }
 
+    Ok(())
+}
+
+/// Scan `root` and answer one question about it.
+///
+/// Every step after parsing the phrase is the MCP server's code, unchanged:
+/// the same `Atlas`, the same `Answer`, the same rendering. A second
+/// implementation here would drift, and the terminal would start disagreeing
+/// with the agent about the same repository.
+fn query(
+    root: PathBuf,
+    question: &str,
+    limit: Option<usize>,
+    depth: Option<usize>,
+    json: bool,
+) -> Result<()> {
+    let root = canonicalize_root(root)?;
+    let mut question = Question::parse(question).map_err(|_| {
+        let forms = QUESTION_FORMS
+            .iter()
+            .map(|form| format!("  {form}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        anyhow!("cannot answer {question:?}. Ask one of:\n{forms}")
+    })?;
+
+    match (&mut question, depth) {
+        (Question::BlastRadius { depth: walk, .. }, Some(requested)) => *walk = requested,
+        // Silently ignoring a flag the user typed would leave them believing
+        // it applied. Say so, and answer the question they asked anyway.
+        (_, Some(_)) => eprintln!("note: --depth only applies to a blast radius; ignoring it"),
+        (_, None) => {}
+    }
+
+    let atlas = Atlas::scan(&root);
+    let answer = atlas.answer(&question, limit.unwrap_or(DEFAULT_LIMIT));
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&answer)?);
+    } else {
+        print!("{}", render(&answer));
+    }
+
+    // A path that named nothing is a real failure for anything scripting
+    // this, even though the printed answer is the useful one. Exit non-zero
+    // after printing it, rather than instead of printing it.
+    if matches!(answer, Answer::Unlocated { .. }) {
+        use std::io::Write;
+        std::io::stdout().flush().ok();
+        std::process::exit(1);
+    }
     Ok(())
 }
 
@@ -245,8 +424,46 @@ mod tests {
         let json: serde_json::Value =
             serde_json::from_str(&contents).expect("written output should parse as valid JSON");
 
-        assert_eq!(json["stats"]["resolution_rate"], 1.0);
-        assert_eq!(json["edges"].as_array().unwrap().len(), 1);
+        // `scan -o` writes the workspace: one entry per project, each with
+        // its own graph, so a directory holding several projects produces
+        // several graphs rather than one merged fiction.
+        let project = &json["projects"][0];
+        assert_eq!(project["id"], ".");
+        assert_eq!(project["graph"]["stats"]["resolution_rate"], 1.0);
+        assert_eq!(project["graph"]["edges"].as_array().unwrap().len(), 1);
+        assert_eq!(json["totals"]["projects"], 1);
+    }
+
+    /// The feature this shape exists for: pointed at a folder that merely
+    /// contains projects, the scan produces one graph per project.
+    #[test]
+    fn scanning_a_folder_of_projects_writes_one_graph_per_project() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path().join("workspace");
+        for (name, manifest) in [("web", "package.json"), ("api", "package.json")] {
+            fs::create_dir_all(root.join(name).join("src")).unwrap();
+            fs::write(
+                root.join(name).join(manifest),
+                format!(r#"{{"name":"{name}"}}"#),
+            )
+            .unwrap();
+            fs::write(root.join(name).join("src/a.ts"), "export const a = 1;").unwrap();
+        }
+        let output = dir.path().join("graph.json");
+
+        scan(root, Some(output.clone())).unwrap();
+
+        let json: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&output).unwrap()).unwrap();
+        assert_eq!(json["split"], true);
+        let projects = json["projects"].as_array().unwrap();
+        assert_eq!(projects.len(), 2);
+        let ids: Vec<&str> = projects.iter().map(|p| p["id"].as_str().unwrap()).collect();
+        assert_eq!(ids, vec!["api", "web"]);
+        // Two source files and the two `package.json` manifests: every file
+        // is a node, not only the ones an extractor can read.
+        assert_eq!(json["totals"]["nodes"], 4);
+        assert_eq!(json["totals"]["files_analysed"], 2);
     }
 
     /// A file that cannot be read (as opposed to one that fails to parse)
@@ -283,7 +500,9 @@ mod tests {
 
         let contents = fs::read_to_string(&output).unwrap();
         let json: serde_json::Value = serde_json::from_str(&contents).unwrap();
-        let failures = json["stats"]["failures"].as_array().unwrap();
+        let failures = json["projects"][0]["graph"]["stats"]["failures"]
+            .as_array()
+            .unwrap();
         assert!(
             failures.iter().any(|f| f["path"] == "src/bad.ts"
                 && f["reason"].as_str().unwrap().contains("read failed")),
@@ -356,5 +575,108 @@ mod tests {
                 output: Some(PathBuf::from("g.json")),
             })
         );
+    }
+
+    /// The question is positional and the root is a flag, so the shortest
+    /// useful invocation is `kog query "what depends on X"` in the directory
+    /// you are already standing in.
+    #[test]
+    fn query_takes_the_question_first_and_defaults_the_root() {
+        let cli = Cli::try_parse_from(["kog", "query", "what depends on src/a.ts"]).unwrap();
+        assert_eq!(
+            cli.command,
+            Some(Command::Query {
+                question: "what depends on src/a.ts".to_string(),
+                root: PathBuf::from("."),
+                limit: None,
+                depth: None,
+                json: false,
+            })
+        );
+    }
+
+    #[test]
+    fn query_accepts_a_root_a_limit_a_depth_and_json() {
+        let cli = Cli::try_parse_from([
+            "kog",
+            "query",
+            "blast radius of src/a.ts",
+            "--root",
+            "some/dir",
+            "--limit",
+            "5",
+            "--depth",
+            "2",
+            "--json",
+        ])
+        .unwrap();
+        assert_eq!(
+            cli.command,
+            Some(Command::Query {
+                question: "blast radius of src/a.ts".to_string(),
+                root: PathBuf::from("some/dir"),
+                limit: Some(5),
+                depth: Some(2),
+                json: true,
+            })
+        );
+    }
+
+    #[test]
+    fn mcp_root_defaults_to_the_current_directory() {
+        let cli = Cli::try_parse_from(["kog", "mcp"]).unwrap();
+        assert_eq!(
+            cli.command,
+            Some(Command::Mcp {
+                root: PathBuf::from("."),
+            })
+        );
+    }
+
+    /// A phrase the parser does not recognise must not be answered with
+    /// something else. The error names every form that would have worked, so
+    /// the next attempt succeeds.
+    #[test]
+    fn an_unreadable_question_names_the_forms_that_would_have_worked() {
+        let dir = TempDir::new().unwrap();
+        let err = query(dir.path().to_path_buf(), "do the thing", None, None, false).unwrap_err();
+
+        let message = err.to_string();
+        for form in QUESTION_FORMS {
+            assert!(
+                message.contains(form),
+                "the error should list {form:?}, got {message:?}"
+            );
+        }
+    }
+
+    /// `query` reaches the same `Answer` the MCP server does — asserted
+    /// through the JSON output, which is that answer verbatim.
+    #[test]
+    fn query_answers_from_a_real_scan() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path().join("project");
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::write(root.join("src/lib.ts"), "export const x = 1;").unwrap();
+        fs::write(root.join("src/a.ts"), r#"import { x } from "./lib";"#).unwrap();
+
+        query(
+            root.clone(),
+            "what depends on src/lib.ts",
+            None,
+            None,
+            false,
+        )
+        .expect("a well-formed question about a real file must be answered");
+    }
+
+    #[test]
+    fn a_query_against_an_unreadable_root_fails_the_same_way_a_scan_does() {
+        let dir = TempDir::new().unwrap();
+        let missing = dir.path().join("does-not-exist");
+
+        let err = query(missing.clone(), "summary", None, None, false).unwrap_err();
+
+        assert!(err.to_string().contains("not a readable directory"));
     }
 }

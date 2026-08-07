@@ -23,10 +23,11 @@
 <br />
 
 > [!NOTE]
-> **v0.1.** Sixteen languages, file-level granularity. The graph is a proof of the
-> pipeline, not an interface yet — no search, no filters, no clustering. What is
-> finished is the part that has to be right: the resolution, the coverage, and the
-> two numbers that report them.
+> **v0.3.** Twenty-one languages, file-level granularity, and an MCP server so an
+> agent can ask the graph instead of grepping. Measured on eleven public
+> repositories — one per language — because a language that has never met real code
+> does not have a rate, it has a passing unit test. That corpus is what found a Go
+> resolver at 0.1261 and a coverage figure overstated by 29 points.
 
 <br />
 
@@ -151,6 +152,20 @@ The CLI and the MCP server are the same code: one `Atlas`, one set of answers, o
 rendering. Two implementations would eventually disagree, and only one of them would be
 measured.
 
+**Check it works before wiring anything up.** The server is newline-delimited JSON-RPC on
+stdin and stdout, so a pipe is a complete client:
+
+```bash
+printf '%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{}}}' \
+  '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"scan_summary","arguments":{}}}' \
+  | kog mcp . | jq -r 'select(.id==2) | .result.content[0].text'
+```
+
+Progress goes to stderr and protocol messages to stdout, so that pipe stays clean. Swap
+`scan_summary` for `what_depends_on` with `{"path": "src/index.ts"}` to ask a real
+question. Once it answers there, it will answer from any client.
+
 <br />
 
 # Two numbers, and how to check them
@@ -236,11 +251,13 @@ Full breakdown, with the raw output and every gap categorised, in
 
 Stated plainly, because a tool that only advertises its strengths is not measuring anything.
 
-- **Sixteen languages, not all of them.** TypeScript, JavaScript, Vue, Svelte, Astro, Go,
-  Python, Rust, C, C++, Java, C#, Ruby, PHP, MDX, HTML, CSS/Sass/Less and shell.
+- **Twenty-one languages, not all of them.** TypeScript, JavaScript, Vue, Svelte, Astro, MDX, Go,
+  Python, Rust, C, C++, Java, C#, Ruby, PHP, HTML, CSS, Sass, Less, Stylus and
+  shell.
   Everything else is a node in the graph and a named line in the coverage report — SQL,
-  Swift, Kotlin, Scala, Elixir — but its own imports are not read. The report says which,
-  and how many.
+  Swift, Kotlin, Scala, Elixir, and every template language — but its own imports are not
+  read. The report says which, and how many. That count is derived from the registry by a
+  test, not written by hand: it had drifted to "sixteen" and nothing caught it.
 - **C++ is at 0.8732 and is not fixed.** Every unresolved specifier on `fmtlib/fmt` is a
   third-party header (`gtest`, `gmock`, `absl`) that should count as a dependency and
   leave the denominator; instead it is probed as internal and fails closed. Published
@@ -255,8 +272,9 @@ Stated plainly, because a tool that only advertises its strengths is not measuri
   "$CONFIG"` is reported as undecidable rather than broken.
 - **A Go import is a package**, so one specifier becomes an edge to every file in that
   directory. That is what a file-level graph of Go means, not a bug.
-- **The renderer is a prototype.** It proves 2,800 nodes render and stay interactive. It
-  is not an interface.
+- **The interface is early.** It searches, filters, clusters and inspects, and it holds
+  2,800 nodes interactively — but it is one window built ahead of the desktop shell it is
+  meant to become, not a finished product.
 - **`files touching X` means an *external* package.** A workspace package or a path alias
   resolves to a file, so `@documenso/prisma` answers zero there while 484 files import it.
   The answer says which index it searched and points at the query that does work, rather
@@ -278,8 +296,8 @@ built with Vite and embedded in the binary at compile time.
 
 # Project status
 
-v0.1 and v0.3 are complete and measured: sixteen languages, and an MCP server so an agent
-asks the graph instead of grepping. [`ROADMAP.md`](ROADMAP.md) has what is left — the
+v0.1 and v0.3 are complete and measured: twenty-one languages, and an MCP server so an
+agent asks the graph instead of grepping. [`ROADMAP.md`](ROADMAP.md) has what is left — the
 languages the coverage report keeps naming, packaging, then a desktop shell.
 
 Contributions welcome — [`.github/CONTRIBUTING.md`](.github/CONTRIBUTING.md).

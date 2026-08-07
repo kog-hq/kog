@@ -28,7 +28,7 @@ v0 read TypeScript and dropped everything else without saying so. A tool that su
 language and silently ignores the other nine scores a perfect resolution rate on a
 polyglot repository.
 
-- **Sixteen languages.** TypeScript, JavaScript, Vue, Svelte, Astro, Go, Python, Rust, C,
+- **Twenty languages.** TypeScript, JavaScript, Vue, Svelte, Astro, Go, Python, Rust, C,
   C++, Java, C#, Ruby, PHP, HTML, CSS/Sass/Less, shell. One `Extractor` implementation
   each, dispatched by extension through a registry. Go proved the abstraction holds where
   the node stops being a file: an import names a package, one specifier resolves to a set

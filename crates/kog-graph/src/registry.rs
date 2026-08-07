@@ -210,6 +210,58 @@ mod tests {
     /// scan while every other language still reports a healthy rate. This
     /// test compiles every shipped query once, so that failure is a red
     /// test rather than a missing third of a graph.
+    /// The README says how many languages KOG reads. That is a published
+    /// claim like any other, so it is derived here rather than counted by
+    /// hand — it had drifted to "sixteen" while the real set was larger, and
+    /// nothing would have caught it.
+    ///
+    /// A "language" is a distinct `Node::lang` label, which is what the
+    /// per-language table publishes a rate for. It is not the number of
+    /// extractors: one grammar covers TypeScript and JavaScript, one covers
+    /// C and C++, one covers Vue, Svelte and Astro.
+    #[test]
+    fn the_language_labels_are_the_set_the_readme_claims() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let registry = Registry::for_root(dir.path());
+
+        let mut labels: Vec<&'static str> = Vec::new();
+        for extractor in registry.extractors() {
+            for extension in extractor.extensions() {
+                labels.push(extractor.lang_for(Path::new(&format!("a.{extension}"))));
+            }
+        }
+        labels.sort_unstable();
+        labels.dedup();
+
+        assert_eq!(
+            labels,
+            vec![
+                "astro",
+                "c",
+                "cpp",
+                "csharp",
+                "css",
+                "go",
+                "html",
+                "java",
+                "javascript",
+                "less",
+                "mdx",
+                "php",
+                "python",
+                "ruby",
+                "rust",
+                "sass",
+                "shell",
+                "stylus",
+                "svelte",
+                "typescript",
+                "vue",
+            ],
+            "the README and ROADMAP quote this list; update them together"
+        );
+    }
+
     #[test]
     fn every_shipped_extractor_compiles_its_query() {
         let registry = Registry::for_root(&PathBuf::from("."));

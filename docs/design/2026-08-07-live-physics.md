@@ -16,6 +16,12 @@ renderer differs, and sigma is already WebGL. Their documented drag behaviour
 also matches the choice made below — a released node is immediately re-subjected
 to the active forces rather than left pinned.
 
+`acme-saas` throughout this document is one private repository, renamed. It is
+the workspace the layout was tuned against — 864 nodes, 3,121 edges, 151 of them
+unconnected — and every number attached to it is a real measurement of a real
+codebase, but not one a reader can go and check. Where a claim has to be
+verifiable it is made against `documenso`, which is public.
+
 ## What is being discarded, and the risk accepted
 
 ForceAtlas2 goes. With it go `gravity: 0.02`, the `scalingRatio` ladder,

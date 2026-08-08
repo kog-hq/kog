@@ -69,9 +69,19 @@ export function App({ workspace }: { workspace: KogWorkspace }) {
 
   // A new project is a new graph: the old selection names a file that is not
   // in it, and its size may call for a different number of labels.
+  //
+  // The filters go with them, and that one was a real bug rather than tidiness.
+  // `filters.languages` is a set of language *names*, and a name means nothing
+  // outside the project it was ticked in. Unticking `python` in a Python
+  // project left a set that does not contain `typescript`, so arriving in a
+  // TypeScript project showed every box unticked and hid the whole graph — a
+  // filter for a language that project does not contain, with nothing on
+  // screen to say where it came from. Same for `kinds` and the two toggles:
+  // "only files with gaps" is an answer about one scan.
   useEffect(() => {
     setSelected(null);
     setHiddenCommunities(new Set());
+    setFilters(NO_FILTERS);
     setLabelMode(defaultLabelMode(project.graph.nodes.length));
   }, [project]);
 

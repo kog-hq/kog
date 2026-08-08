@@ -5,19 +5,22 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-# Not on crates.io, and this is a fact about the crate rather than a policy:
-# `build.rs` embeds `../../app/dist`, which is outside the package, so what
-# `cargo publish` uploads cannot build. `cargo install kog-cli` would fail on
-# every machine. The install story is the prebuilt binary and the shell
-# installer — see dist-workspace.toml.
-publish = false
-
-[package.metadata.dist]
-# `publish = false` above hides a package from dist, which reads it as "not
-# meant to be released". Here it means the opposite: being absent from
-# crates.io is exactly *why* this binary has to ship prebuilt. Without this
-# line `dist plan` reports the workspace has nothing to release.
-dist = true
+# No `publish = false` here, and the reason is worth writing down because the
+# obvious choice is the broken one.
+#
+# This crate genuinely cannot go to crates.io: `build.rs` embeds
+# `../../app/dist`, which is outside the package, so what `cargo publish`
+# uploads cannot build. But `publish = false` in a manifest does not mean
+# "don't publish" to release-plz — it means "this package does not exist".
+# `is_publishable()` reads exactly this field, and everything downstream
+# filters on it, so the version is never bumped, the changelog is never
+# written and **the tag is never created** — which is what starts the build
+# of the binaries. The whole release path goes quiet, and reports success.
+#
+# So the refusal lives in release-plz.toml instead, as `publish = false`
+# there, which is that tool's way of saying "release, but never run cargo
+# publish". Doing it by hand still fails on its own: `cargo publish` verifies
+# by building, and this build.rs exits 1 when `app/dist` is missing.
 
 [[bin]]
 name = "kog"

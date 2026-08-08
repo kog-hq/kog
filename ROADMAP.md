@@ -158,8 +158,10 @@ to tools that lay it out far better than either.
 
 Deliberately after usefulness, and the shape is: `release-plz` decides *when* there is a
 release and what version it carries, `dist` decides what a release *contains*, and they
-meet at one git tag. Merging the release PR pushes `v0.2.0`; the tag builds five binaries
-and creates the GitHub Release with them attached.
+meet at one git tag. Merging the release PR pushes the tag; the tag builds five binaries
+and creates the GitHub Release with them attached. The first release is the exception:
+`0.1.0` has never been tagged, so it is tagged on the next push to `main` with no release
+PR in between.
 
 - **Five targets**: macOS on Apple silicon and Intel, Linux on x86-64 and ARM, Windows on
   x86-64. A shell installer and a PowerShell one, plus plain archives with SHA-256 sums
@@ -168,8 +170,11 @@ and creates the GitHub Release with them attached.
   time, so a release build is a bun build followed by a cargo build — expressed once, in
   `.github/workflows/build-setup.yml`, which `dist` injects into each build job.
 - **Not on crates.io, and not as an oversight.** `build.rs` reads `../../app/dist`, which
-  is outside the package, so what `cargo publish` uploads cannot build. `publish = false`
-  in both manifests says so and says why; the prebuilt binary is the install path.
+  is outside the package, so what `cargo publish` uploads cannot build; the prebuilt
+  binary is the install path. The refusal is in `release-plz.toml` and *not* as
+  `publish = false` in the manifests — that field does not mean "release without
+  publishing" to release-plz, it removes the package from every code path it has, so the
+  tag that builds the binaries is never created and the run still exits 0.
 
 Measured rather than assumed: `dist build --artifacts=local` produces a 2.6 MB
 `kog-cli-aarch64-apple-darwin.tar.xz` whose binary answers `kog 0.1.0` and serves the

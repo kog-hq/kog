@@ -1,11 +1,17 @@
 # release-plz decides *when* there is a release and what its version is;
 # `dist` decides what a release contains. They meet at one git tag.
 #
-# The sequence: a push to main updates a "chore: release" PR that bumps the
-# version and writes the changelog from the conventional commits since the
-# last tag. Merging that PR pushes the tag, and the tag starts
-# `.github/workflows/release.yml`, which builds the five binaries and creates
-# the GitHub Release with them attached.
+# The sequence, from the second release on: a push to main updates a "chore:
+# release" PR that bumps the version and writes the changelog from the
+# conventional commits since the last tag. Merging that PR pushes the tag,
+# and the tag starts `.github/workflows/release.yml`, which builds the five
+# binaries and creates the GitHub Release with them attached.
+#
+# The first one is different, and it is worth knowing before it happens.
+# `0.1.0` has never been tagged, so release-plz has nothing to bump: it
+# considers the current version unreleased and tags `v0.1.0` on the next push
+# to main, with no release PR in between. There is also no CHANGELOG.md yet,
+# so that first GitHub Release carries an empty body. Both are one-time.
 
 [workspace]
 # `dist` creates the GitHub Release, with `gh release create` in its `host`
@@ -15,10 +21,22 @@
 # holding the artifacts.
 git_release_enable = false
 
-# Neither crate is published to crates.io — `publish = false` in both
-# manifests says so, and says why. release-plz reads that and skips the
-# publish step, so no CARGO_REGISTRY_TOKEN is needed anywhere; versions are
-# compared against git tags instead of against the registry.
+# Neither crate goes to crates.io, and **this** is the line that says so —
+# not `publish = false` in the manifests, which was the first attempt and
+# which silently disabled everything below it.
+#
+# release-plz filters every package through `is_publishable()`, which reads
+# the manifest's `publish` field, and it does that in the update path as well
+# as the release path. A manifest saying `publish = false` therefore does not
+# produce "release it but skip cargo publish"; it produces "there are no
+# packages" — no version bump, no changelog, no tag, and `INFO nothing to
+# release` as the only trace. Since the tag is what builds the binaries, the
+# whole release path goes quiet and reports success.
+#
+# Here the same words mean what they should: release normally, never run
+# cargo publish. No CARGO_REGISTRY_TOKEN is needed anywhere, and versions are
+# compared against git tags rather than against the registry.
+publish = false
 
 [[package]]
 name = "kog-graph"

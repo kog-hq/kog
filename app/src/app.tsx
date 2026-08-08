@@ -8,6 +8,7 @@ import {
 import { FindFile } from "@/components/find-file";
 import { Inspector } from "@/components/inspector";
 import { Rail } from "@/components/rail";
+import { FloatingControls } from "@/components/floating-controls";
 import { detectCommunities } from "@/graph/communities";
 import type { ColourBy } from "@/graph/build";
 import { NO_FILTERS, type Filters } from "@/components/panels";
@@ -17,6 +18,7 @@ import { indexProject, type KogWorkspace } from "@/lib/kog";
 type Theme = "light" | "dark";
 
 const THEME_KEY = "kog:theme";
+const RAIL_KEY = "kog:rail";
 
 function storedTheme(): Theme {
   const stored = localStorage.getItem(THEME_KEY);
@@ -28,6 +30,11 @@ function storedTheme(): Theme {
 
 export function App({ workspace }: { workspace: KogWorkspace }) {
   const [projectIndex, setProjectIndex] = useState(0);
+  // Remembered, because whether you want the column is a property of how you
+  // work rather than of this session.
+  const [railOpen, setRailOpen] = useState(
+    () => localStorage.getItem(RAIL_KEY) !== "closed",
+  );
   const [theme, setTheme] = useState<Theme>(storedTheme);
   const [selected, setSelected] = useState<string | null>(null);
   const [hovered, setHovered] = useState<string | null>(null);
@@ -55,6 +62,10 @@ export function App({ workspace }: { workspace: KogWorkspace }) {
     document.documentElement.dataset.theme = theme;
     localStorage.setItem(THEME_KEY, theme);
   }, [theme]);
+
+  useEffect(() => {
+    localStorage.setItem(RAIL_KEY, railOpen ? "open" : "closed");
+  }, [railOpen]);
 
   // A new project is a new graph: the old selection names a file that is not
   // in it, and its size may call for a different number of labels.
@@ -146,33 +157,48 @@ export function App({ workspace }: { workspace: KogWorkspace }) {
     // The canvas runs the full window and nothing sits on it by default. The
     // instrument reading a map should not be bigger than the map.
     <div className="flex h-full overflow-hidden">
-      <Rail
-        workspace={workspace}
-        project={project}
-        index={index}
-        communities={communities}
-        hiddenCommunities={hiddenCommunities}
-        onHiddenCommunities={setHiddenCommunities}
-        colourBy={colourBy}
-        onColourBy={setColourBy}
-        onProject={setProjectIndex}
-        onSearch={() => setSearching(true)}
-        filters={filters}
-        onFilters={setFilters}
-        groupByFolder={groupByFolder}
-        onGroupByFolder={setGroupByFolder}
-        labelMode={labelMode}
-        onLabelMode={setLabelMode}
-        edgeMode={edgeMode}
-        onEdgeMode={setEdgeMode}
-        theme={theme}
-        onTheme={() => setTheme(theme === "dark" ? "light" : "dark")}
-        onSelect={setSelected}
-        onHover={setHovered}
-        onExport={onExport}
-      />
+      {railOpen && (
+        <Rail
+          workspace={workspace}
+          project={project}
+          index={index}
+          communities={communities}
+          hiddenCommunities={hiddenCommunities}
+          onHiddenCommunities={setHiddenCommunities}
+          colourBy={colourBy}
+          onColourBy={setColourBy}
+          onProject={setProjectIndex}
+          onSearch={() => setSearching(true)}
+          filters={filters}
+          onFilters={setFilters}
+          groupByFolder={groupByFolder}
+          onGroupByFolder={setGroupByFolder}
+          labelMode={labelMode}
+          onLabelMode={setLabelMode}
+          edgeMode={edgeMode}
+          onEdgeMode={setEdgeMode}
+          theme={theme}
+          onTheme={() => setTheme(theme === "dark" ? "light" : "dark")}
+          onSelect={setSelected}
+          onHover={setHovered}
+          onClose={() => setRailOpen(false)}
+          onExport={onExport}
+        />
+      )}
 
       <main className="relative min-w-0 flex-1">
+        <FloatingControls
+          railOpen={railOpen}
+          onOpenRail={() => setRailOpen(true)}
+          colourBy={colourBy}
+          onColourBy={setColourBy}
+          labelMode={labelMode}
+          onLabelMode={setLabelMode}
+          edgeMode={edgeMode}
+          onEdgeMode={setEdgeMode}
+          theme={theme}
+          onTheme={() => setTheme(theme === "dark" ? "light" : "dark")}
+        />
         <GraphCanvas
           project={project}
           index={index}

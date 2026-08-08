@@ -1,0 +1,36 @@
+# release-plz decides *when* there is a release and what its version is;
+# `dist` decides what a release contains. They meet at one git tag.
+#
+# The sequence: a push to main updates a "chore: release" PR that bumps the
+# version and writes the changelog from the conventional commits since the
+# last tag. Merging that PR pushes the tag, and the tag starts
+# `.github/workflows/release.yml`, which builds the five binaries and creates
+# the GitHub Release with them attached.
+
+[workspace]
+# `dist` creates the GitHub Release, with `gh release create` in its `host`
+# job. If release-plz created one first for the same tag that command fails,
+# and it fails *after* the binaries have been built — an hour of runners for
+# nothing. So exactly one of the two tools makes releases, and it is the one
+# holding the artifacts.
+git_release_enable = false
+
+# Neither crate is published to crates.io — `publish = false` in both
+# manifests says so, and says why. release-plz reads that and skips the
+# publish step, so no CARGO_REGISTRY_TOKEN is needed anywhere; versions are
+# compared against git tags instead of against the registry.
+
+[[package]]
+name = "kog-graph"
+# One tag per release, not one per crate. The two crates share a version
+# (`version.workspace = true`) so they move together anyway, and `dist`
+# starts a separate Release run for every tag pushed — a second tag would
+# start a run for a library that produces no binary, which fails.
+git_tag_enable = false
+
+[[package]]
+name = "kog-cli"
+# `v0.2.0`, not the workspace default `kog-cli-v0.2.0`: the tag names the
+# release, and the release is the `kog` binary. It also has to match what
+# release.yml watches for, `'**[0-9]+.[0-9]+.[0-9]+*'`.
+git_tag_name = "v{{ version }}"

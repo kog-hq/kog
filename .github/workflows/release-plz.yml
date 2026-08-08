@@ -1,0 +1,70 @@
+# Versioning and changelog. The binaries are built by release.yml, which this
+# workflow starts by pushing a tag; see release-plz.toml for how the two
+# divide the work.
+name: Release-plz
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  # Merging the release PR lands the version bump on main; this job turns that
+  # commit into a tag.
+  release:
+    name: tag the release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # release-plz compares against the last tag, so a shallow clone
+          # would make every release look like the first one.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: release-plz/action@v0
+        with:
+          command: release
+        env:
+          # A GitHub-limitation, and the one thing most likely to look like a
+          # bug here: **a tag pushed with the built-in `GITHUB_TOKEN` does not
+          # start any workflow**. Without `RELEASE_PLZ_TOKEN` — a PAT with
+          # `contents: write` — the tag lands and release.yml never runs, so
+          # the release exists with no binaries attached and nothing reports
+          # an error. The fallback keeps the release PR working on a fork or
+          # before the secret is set; it does not make the binaries appear.
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN || secrets.GITHUB_TOKEN }}
+
+  # Runs on every push to main: keeps one open PR holding the next version and
+  # its changelog, so what the next release would contain is always readable.
+  release-pr:
+    name: open or update the release PR
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    # Two runs rewriting the same branch race and one loses; queued rather
+    # than cancelled, because the cancelled one is the one with the newest
+    # commit in it.
+    concurrency:
+      group: release-plz-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: release-plz/action@v0
+        with:
+          command: release-pr
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN || secrets.GITHUB_TOKEN }}

@@ -5,6 +5,11 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+# Publishable in principle — it is a plain library — but not published, and
+# deliberately: a crates.io version is a public API promise, and this one is
+# still moving under the MCP server and the CLI that share it. Releasing it
+# is its own decision, not a side effect of tagging the binary.
+publish = false
 
 [dependencies]
 anyhow.workspace = true

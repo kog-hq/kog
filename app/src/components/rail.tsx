@@ -1,4 +1,11 @@
-import { Download, Moon, Search, Sun, TriangleAlert } from "lucide-react";
+import {
+  Download,
+  Moon,
+  PanelLeftClose,
+  Search,
+  Sun,
+  TriangleAlert,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
@@ -192,11 +199,82 @@ const EXPORTS = [
 const COLOUR_MODES = ["community", "language"] as const;
 
 /**
+ * What the graph looks like, as opposed to what is in it.
+ *
+ * Lifted out of the rail so the floating controls can show the same three
+ * settings without a second copy drifting away from this one. Filters,
+ * communities and languages stay in the rail: they are lists as much as
+ * controls, and they need the height.
+ */
+export function DisplayControls({
+  colourBy,
+  onColourBy,
+  labelMode,
+  onLabelMode,
+  edgeMode,
+  onEdgeMode,
+}: {
+  colourBy: ColourBy;
+  onColourBy: (value: ColourBy) => void;
+  labelMode: LabelMode;
+  onLabelMode: (value: LabelMode) => void;
+  edgeMode: EdgeMode;
+  onEdgeMode: (value: EdgeMode) => void;
+}) {
+  return (
+    <>
+      <Section title="Colour">
+        <Segmented
+          label="What colour means"
+          value={colourBy}
+          options={COLOUR_MODES}
+          onChange={onColourBy}
+        />
+      </Section>
+
+      <Section title="Labels">
+        <Segmented
+          label="How many labels"
+          value={labelMode}
+          options={LABEL_MODES}
+          onChange={onLabelMode}
+        />
+        <p className="mt-2 px-0.5 text-[11px] leading-relaxed text-muted-foreground">
+          Names fade in as you zoom, and are gone from the overview. This sets
+          how far in they wait.
+        </p>
+      </Section>
+
+      <Section title="Edges">
+        <Segmented
+          label="How many edges"
+          value={edgeMode}
+          options={EDGE_MODES}
+          onChange={onEdgeMode}
+        />
+        <p className="mt-2 px-0.5 text-[11px] leading-relaxed text-muted-foreground">
+          {edgeMode === "linked"
+            ? "Only edges touching a file on screen. Zoom out to see them all."
+            : edgeMode === "all"
+              ? "Every edge, including those crossing the view between two files you cannot see."
+              : "No edges. Position and colour still carry the structure."}
+        </p>
+      </Section>
+    </>
+  );
+}
+
+/**
  * The instrument column.
  *
  * Everything that changes what is on the canvas is on screen: the colour
  * mode, how many labels, which kinds of file, which communities, which
  * languages. Nothing that filters the graph hides behind a menu.
+ *
+ * It can be closed, though. A map is worth more than the instrument reading
+ * it, and 268 px of a laptop window is a fifth of the graph — so the same
+ * controls are reachable from the floating cluster on the canvas, and this
+ * column is a place to put them rather than the only one.
  */
 export function Rail({
   workspace,
@@ -221,6 +299,7 @@ export function Rail({
   onTheme,
   onSelect,
   onHover,
+  onClose,
   onExport,
 }: {
   workspace: KogWorkspace;
@@ -245,6 +324,8 @@ export function Rail({
   onTheme: () => void;
   onSelect: (id: string) => void;
   onHover: (id: string | null) => void;
+  /** Close the column. The controls survive in the floating cluster. */
+  onClose: () => void;
   onExport: () => void;
 }) {
   const { stats } = project.graph;
@@ -279,10 +360,32 @@ export function Rail({
   }
 
   return (
-    <aside className="flex h-full w-[268px] shrink-0 flex-col border-r border-border bg-card">
+    // `bg-rail`, not `bg-card`. The rail and the floating inspector used to
+    // share one surface, which forced them to sit at the same depth — and the
+    // two want different things. A panel hovering over the canvas has to lift
+    // off it; a rail bolted to the window edge only has to be distinct from
+    // it.
+    //
+    // Which way it steps is Obsidian's rule, and it is worth stating because
+    // guessing it got it backwards: the canvas takes the *extreme* value of
+    // the theme and the rail moves toward mid grey. Dark, that is
+    // `--background-primary: #1C1C1C` for the stage against
+    // `--background-secondary: #282828` for the sidebar — the sidebar is the
+    // lighter one. Light, it inverts, because there the extreme is the pale
+    // end. Either way the stage is the surface furthest from the reader.
+    <aside className="flex h-full w-[268px] shrink-0 flex-col border-r border-border bg-rail">
       <header className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2.5">
         <Mark className="size-4 shrink-0" />
         <span className="shrink-0 text-[13px] tracking-tight">KOG</span>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Hide the panel"
+          title="Hide the panel"
+          className="row -ml-1 grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground"
+        >
+          <PanelLeftClose className="size-3.5" />
+        </button>
         {workspace.projects.length > 1 ? (
           <select
             value={workspace.projects.indexOf(project)}
@@ -344,39 +447,14 @@ export function Rail({
       </section>
 
       <div className="scrollbar-slim min-h-0 flex-1 overflow-y-auto">
-        <Section title="Colour">
-          <Segmented
-            label="What colour means"
-            value={colourBy}
-            options={COLOUR_MODES}
-            onChange={onColourBy}
-          />
-        </Section>
-
-        <Section title="Labels">
-          <Segmented
-            label="How many labels"
-            value={labelMode}
-            options={LABEL_MODES}
-            onChange={onLabelMode}
-          />
-        </Section>
-
-        <Section title="Edges">
-          <Segmented
-            label="How many edges"
-            value={edgeMode}
-            options={EDGE_MODES}
-            onChange={onEdgeMode}
-          />
-          <p className="mt-2 px-0.5 text-[11px] leading-relaxed text-muted-foreground">
-            {edgeMode === "linked"
-              ? "Only edges touching a file on screen. Zoom out to see them all."
-              : edgeMode === "all"
-                ? "Every edge, including those crossing the view between two files you cannot see."
-                : "No edges. Position and colour still carry the structure."}
-          </p>
-        </Section>
+        <DisplayControls
+          colourBy={colourBy}
+          onColourBy={onColourBy}
+          labelMode={labelMode}
+          onLabelMode={onLabelMode}
+          edgeMode={edgeMode}
+          onEdgeMode={onEdgeMode}
+        />
 
         <Section title="Show">
           <div className="flex flex-col">

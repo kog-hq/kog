@@ -1,5 +1,4 @@
 import Graph from "graphology";
-import forceAtlas2 from "graphology-layout-forceatlas2";
 import type { KogProject, NodeKind, ProjectIndex } from "@/lib/kog";
 import { dirName } from "@/lib/kog";
 import type { Communities } from "./communities";
@@ -7,10 +6,13 @@ import type { Communities } from "./communities";
 /**
  * Turning a scan into something sigma can draw.
  *
- * The layout is computed once per view and never again: filtering, selecting
- * and recolouring all run through sigma's reducers, which repaint without
- * moving a node. A graph that rearranges itself every time you tick a
- * checkbox is unreadable, however fast it is.
+ * This function seeds positions and stops. The layout itself is live and
+ * belongs to `physics.ts`, which the canvas starts on the graph its renderer
+ * is drawing. Nothing long-lived may begin here: this is a `useMemo` factory,
+ * and React may call it more than once per value it keeps.
+ *
+ * Filtering, selecting and recolouring all run through sigma's reducers, which
+ * repaint without moving a node.
  */
 
 export type ColourBy = "community" | "language";
@@ -28,9 +30,27 @@ export type NodeAttributes = {
   y: number;
 };
 
+/**
+ * How big a file is drawn, in screen pixels.
+ *
+ * Obsidian's curve — `clamp(3·√(weight+1), 8, 30)` — rescaled to our pixel
+ * range. Two properties carry over, and both matter more than the exact
+ * numbers:
+ *
+ * **A floor.** Our previous curve started at 2.2 px, so a file that imports
+ * nothing and is imported by nothing drew as a speck that reads as dirt on the
+ * screen rather than as a finding. Nothing here disappears quietly, and being
+ * too small to see is a way of disappearing.
+ *
+ * **A ceiling.** The old curve had a 6× spread between the smallest and a
+ * 232-dependent hub, so hubs became discs that swallowed their own
+ * neighbourhoods. Obsidian's spread is 3.75×; this is 3.8×. Degree is already
+ * carried by where a node sits and how many lines reach it — size only has to
+ * rank it, not shout.
+ */
 function sizeFor(degree: number, kind: NodeKind): number {
-  const base = 2.2 + Math.sqrt(degree) * 1.55;
-  return kind === "asset" ? base * 0.6 : base;
+  const base = Math.min(11, Math.max(2.9, 1.1 * Math.sqrt(degree + 1)));
+  return kind === "asset" ? base * 0.75 : base;
 }
 
 export type BuildOptions = {
@@ -46,6 +66,14 @@ export type BuildOptions = {
  * finds a minimum in which every cluster overlaps every other, and no number
  * of iterations gets it out. Started with the communities already apart, the
  * same solver spends its effort on shape instead of separation.
+ *
+ * It is also the one place KOG can beat Obsidian on Obsidian's own ground:
+ * they run the same solver, and they have no communities to seed it with.
+ *
+ * The radii here are small against the solver's 250-unit springs, and that is
+ * deliberate — the graph starts as a tight knot and blooms outward into its
+ * real scale, which is what makes the opening read as an unfolding rather than
+ * as a jolt.
  *
  * Communities are laid on a spiral by rank, biggest nearest the middle, so a
  * long tail of two-file groups packs tightly at the edge instead of each
@@ -66,7 +94,12 @@ function seed(graph: Graph, communities: Communities): void {
   });
 
   const placed = new Map<number, number>();
+  const unconnected: string[] = [];
   graph.forEachNode((node, attributes) => {
+    if (graph.degree(node) === 0) {
+      unconnected.push(node);
+      return;
+    }
     const community = attributes.community as number;
     const centre = centres.get(community) ?? { x: 0, y: 0 };
     const index = placed.get(community) ?? 0;
@@ -78,55 +111,26 @@ function seed(graph: Graph, communities: Communities): void {
     graph.setNodeAttribute(node, "x", centre.x + Math.cos(angle) * spread);
     graph.setNodeAttribute(node, "y", centre.y + Math.sin(angle) * spread);
   });
-}
 
-/**
- * Park the files nothing points at, and that point at nothing.
- *
- * A force layout has no opinion about a node with no edges: it drifts
- * wherever the last repulsion pushed it, and a few hundred of them scatter
- * across the whole canvas and triple the area the camera has to cover to fit
- * the graph. They are real files and they stay on screen — packed into a
- * tidy block below the graph, where they read as what they are: a shelf of
- * things that connect to nothing.
- */
-function parkIsolated(graph: Graph): void {
-  const isolated = graph.filterNodes((node) => graph.degree(node) === 0);
-  if (isolated.length === 0) return;
-
-  let minX = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-  graph.forEachNode((node, attributes) => {
-    if (graph.degree(node) === 0) return;
-    minX = Math.min(minX, attributes.x as number);
-    maxX = Math.max(maxX, attributes.x as number);
-    maxY = Math.max(maxY, attributes.y as number);
-  });
-  if (!Number.isFinite(minX)) {
-    minX = -200;
-    maxX = 200;
-    maxY = 0;
-  }
-
-  const step = 13;
-  // A block about as wide as it is tall, never wider than the graph above it.
+  // The files nothing points at, and that point at nothing, start spread
+  // evenly around the outside — one circle, one file per equal slice of it.
   //
-  // It used to fill the full width in a single row, which reads fine until
-  // you filter: ask for a language whose files import nothing — 56 `.sql`
-  // files, say — and the camera has to zoom out to the width of the entire
-  // graph to hold a strip one node high, so the answer arrives as a dotted
-  // line too small to see. A compact block frames at a useful zoom.
-  const widest = Math.max(4, Math.floor(Math.max(maxX - minX, 200) / step));
-  const perRow = Math.min(widest, Math.ceil(Math.sqrt(isolated.length * 1.6)));
-  const left = (minX + maxX) / 2 - ((perRow - 1) * step) / 2;
-  isolated.forEach((node, index) => {
-    graph.setNodeAttribute(node, "x", left + (index % perRow) * step);
-    graph.setNodeAttribute(
-      node,
-      "y",
-      maxY + 70 + Math.floor(index / perRow) * step,
-    );
+  // Where they end up is not decided here: repulsion against the centre force
+  // settles every degree-0 file at the same distance, and that ring is a
+  // property of the physics rather than of this seed. What the seed decides is
+  // whether they arrive there *evenly*. Louvain has no use for a node with no
+  // edges, so it drops all of them into one community, and seeding that
+  // community like any other put all 151 unconnected files of `acme-saas`
+  // on a single patch of the spiral. They then blew outward together and
+  // settled as a lopsided arc across a third of the circle, because the only
+  // thing that could have spread them the rest of the way round is their own
+  // mutual repulsion — and by the time it had pushed them that far the solver
+  // had cooled. Starting them apart costs nothing and the arc closes.
+  const step = (Math.PI * 2) / Math.max(1, unconnected.length);
+  const ring = radius * 1.2 + 40;
+  unconnected.forEach((node, index) => {
+    graph.setNodeAttribute(node, "x", Math.cos(index * step) * ring);
+    graph.setNodeAttribute(node, "y", Math.sin(index * step) * ring);
   });
 }
 
@@ -223,37 +227,6 @@ export function buildGraph(
   });
 
   seed(graph, communities);
-
-  const order = graph.order;
-  forceAtlas2.assign(graph, {
-    // More repulsion needs more time to settle: cut the run short and the
-    // clusters are still on their way apart when the picture is taken.
-    iterations: order > 2000 ? 240 : order > 700 ? 420 : 380,
-    settings: {
-      ...forceAtlas2.inferSettings(graph),
-      // Gravity near zero: the default pulls everything back into one disc,
-      // which is precisely the shape that made the graph unreadable. What
-      // holds it together is the edges, and they are enough.
-      gravity: 0.02,
-      // Room between clusters, and no overlapping discs inside them.
-      //
-      // Scaled with the graph: at 14 a 900-node, 3,000-edge repository packed
-      // its clusters until they touched, and every edge running between two
-      // of them crossed the same few hundred pixels. No amount of thinning
-      // the ink fixes that — the strokes still overlap, they just overlap
-      // fainter. Space is the fix; thin ink is what keeps it calm once there
-      // is space.
-      scalingRatio: order > 700 ? 32 : order > 250 ? 22 : 14,
-      adjustSizes: true,
-      // Hubs are pushed to the edge of their own cluster instead of sitting
-      // on top of it, which is what makes a cluster's shape readable.
-      outboundAttractionDistribution: true,
-      barnesHutOptimize: order > 500,
-      slowDown: 4,
-    },
-  });
-
-  parkIsolated(graph);
 
   return graph;
 }

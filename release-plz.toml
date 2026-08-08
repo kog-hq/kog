@@ -45,6 +45,13 @@ name = "kog-graph"
 # starts a separate Release run for every tag pushed — a second tag would
 # start a run for a library that produces no binary, which fails.
 git_tag_enable = false
+# And no changelog either, for the same reason one step further on. Every
+# heading in a generated changelog links to the tag of its version, so a
+# crate with no tag gets a file of dead links — the first one already pointed
+# at `kog-graph-v0.1.0`, which by design does not exist. One changelog, for
+# the thing that ships; it is also the one `dist` reads to write the release
+# notes.
+changelog_update = false
 
 [[package]]
 name = "kog-cli"

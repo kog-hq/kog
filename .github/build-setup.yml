@@ -1,0 +1,28 @@
+# Steps dist injects into every build job, before it runs `cargo build`.
+# Referenced from `github-build-setup` in dist-workspace.toml, whose paths are
+# relative to `.github/workflows` — hence the `../` there. This file lives one
+# directory up on purpose: it is a list of steps rather than a workflow, and
+# GitHub flags every non-workflow YAML inside `.github/workflows` as an
+# invalid workflow, forever, in the Actions tab.
+#
+# `kog-cli` bakes `app/dist` into the binary at compile time with rust-embed,
+# so cargo cannot build the CLI at all until the page has been built —
+# `crates/kog-cli/build.rs` checks for it and exits 1 with the fix. A release
+# binary is therefore a bun build followed by a cargo build, on every one of
+# the five targets, and this is the only place that ordering is expressed for
+# the release path (CI expresses it separately, in ci.yml).
+#
+# `bun --cwd app` rather than `working-directory: app`, and this is not a
+# style choice: dist reserialises these steps into release.yml and keeps only
+# the keys it knows, so a `working-directory` here is dropped without a
+# warning and every `bun install` then runs at the repository root, where
+# there is no package.json. `cd app && …` would work too, but the same steps
+# run on Windows, where the default shell is PowerShell — `--cwd` needs no
+# shell at all. Check `rg working .github/workflows/release.yml` after any
+# change to this file.
+- name: Install bun
+  uses: oven-sh/setup-bun@v2
+- name: Install the page's dependencies
+  run: bun install --cwd app --frozen-lockfile
+- name: Build the page that gets embedded in the binary
+  run: bun run --cwd app build

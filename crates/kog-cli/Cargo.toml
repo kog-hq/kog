@@ -5,6 +5,19 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+# Not on crates.io, and this is a fact about the crate rather than a policy:
+# `build.rs` embeds `../../app/dist`, which is outside the package, so what
+# `cargo publish` uploads cannot build. `cargo install kog-cli` would fail on
+# every machine. The install story is the prebuilt binary and the shell
+# installer — see dist-workspace.toml.
+publish = false
+
+[package.metadata.dist]
+# `publish = false` above hides a package from dist, which reads it as "not
+# meant to be released". Here it means the opposite: being absent from
+# crates.io is exactly *why* this binary has to ship prebuilt. Without this
+# line `dist plan` reports the workspace has nothing to release.
+dist = true
 
 [[bin]]
 name = "kog"

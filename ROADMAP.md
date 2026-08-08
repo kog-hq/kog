@@ -154,10 +154,36 @@ to tools that lay it out far better than either.
 
 ---
 
-## v0.4 — packaging
+## v0.4 — packaging — wired, not yet cut
 
-`release-plz` and `cargo-dist`: versioned releases, generated changelog, prebuilt binaries
-for macOS, Linux and Windows, and a shell installer. Deliberately after usefulness.
+Deliberately after usefulness, and the shape is: `release-plz` decides *when* there is a
+release and what version it carries, `dist` decides what a release *contains*, and they
+meet at one git tag. Merging the release PR pushes `v0.2.0`; the tag builds five binaries
+and creates the GitHub Release with them attached.
+
+- **Five targets**: macOS on Apple silicon and Intel, Linux on x86-64 and ARM, Windows on
+  x86-64. A shell installer and a PowerShell one, plus plain archives with SHA-256 sums
+  for anyone who would rather not pipe a script into a shell.
+- **The page is built before every one of them.** `kog-cli` embeds `app/dist` at compile
+  time, so a release build is a bun build followed by a cargo build — expressed once, in
+  `.github/workflows/build-setup.yml`, which `dist` injects into each build job.
+- **Not on crates.io, and not as an oversight.** `build.rs` reads `../../app/dist`, which
+  is outside the package, so what `cargo publish` uploads cannot build. `publish = false`
+  in both manifests says so and says why; the prebuilt binary is the install path.
+
+Measured rather than assumed: `dist build --artifacts=local` produces a 2.6 MB
+`kog-cli-aarch64-apple-darwin.tar.xz` whose binary answers `kog 0.1.0` and serves the
+embedded page. `just release-plan`, `just release-build` and `just release-ci` run the
+same three steps a contributor needs.
+
+Two things stand between this and a downloadable binary, both one-time and both requiring
+a decision rather than code:
+
+- a `RELEASE_PLZ_TOKEN` secret. A tag pushed with the built-in `GITHUB_TOKEN` starts no
+  workflow, so without it the release exists and carries nothing — silently. This is
+  written at the point of failure in `release-plz.yml`, because it is the one trap here
+  that looks like a bug in someone else's code.
+- the first tag. Nothing about the numbers above changes when it lands.
 
 ---
 

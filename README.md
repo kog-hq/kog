@@ -64,7 +64,28 @@ package directory, a Rust `use` path that ends in a struct rather than a module,
 
 # Installation
 
-### <img src="./assets/icons/rocket.svg" width="14" height="14"/> Build and install
+### <img src="./assets/icons/rocket.svg" width="14" height="14"/> Install the binary
+
+```bash
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/kog-hq/kog/releases/latest/download/kog-cli-installer.sh | sh
+```
+
+Windows, from PowerShell:
+
+```powershell
+powershell -ExecutionPolicy Bypass -c "irm https://github.com/kog-hq/kog/releases/latest/download/kog-cli-installer.ps1 | iex"
+```
+
+macOS and Linux on both Intel and Apple/ARM, Windows on x86-64. No Rust toolchain, no JS
+toolchain, no checkout: the page is inside the binary. Every release also carries the
+plain archives and a `sha256.sum`, if you would rather not pipe a script into a shell —
+and the [releases page](https://github.com/kog-hq/kog/releases) lists them all.
+
+`kog` is not on crates.io, and that is a fact about the binary rather than an omission:
+it embeds a built web page that lives outside the crate, so what `cargo publish` uploads
+could not build. The prebuilt binary is the install path.
+
+### <img src="./assets/icons/book.svg" width="14" height="14"/> Or build it
 
 ```bash
 git clone https://github.com/kog-hq/kog
@@ -73,7 +94,8 @@ just install
 ```
 
 Builds the page, then the CLI that embeds it, then installs `kog` to `~/.cargo/bin`.
-No `just`? The [`justfile`](justfile) shows the two commands it runs.
+Needs Rust and [bun](https://bun.com). No `just`? The [`justfile`](justfile) shows the two
+commands it runs.
 
 ### <img src="./assets/icons/code.svg" width="14" height="14"/> Run it
 

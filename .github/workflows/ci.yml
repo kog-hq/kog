@@ -49,6 +49,33 @@ jobs:
       - name: Tests
         run: cargo test --all-features
 
+  release-workflow:
+    name: release.yml matches its config
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # release.yml is generated from dist-workspace.toml and
+      # .github/build-setup.yml — editing either without regenerating leaves
+      # a release path that builds something other than what the config says,
+      # and nothing finds out until a tag is pushed and the binaries are
+      # already wrong. `just release-ci` regenerates it.
+      #
+      # Pinned to the same version as `cargo-dist-version` in
+      # dist-workspace.toml: a different one generates a different file and
+      # this check would fail for a reason that is not a mistake.
+      - name: Install dist
+        env:
+          DIST_VERSION: "0.32.0"
+        run: |
+          curl --proto '=https' --tlsv1.2 -LsSf \
+            "https://github.com/axodotdev/cargo-dist/releases/download/v${DIST_VERSION}/cargo-dist-installer.sh" | sh
+
+      - name: Check for drift
+        run: dist generate --check
+
   secrets:
     name: no committed secrets
     runs-on: ubuntu-latest

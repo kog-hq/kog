@@ -81,20 +81,25 @@ const COMMUNITY: Swatch[] = [
 ];
 
 /** Past the tenth community, and for anything unassigned. */
-const OUT_OF_PALETTE: Swatch = { light: "#9ca0ad", dark: "#575b66" };
+const OUT_OF_PALETTE: Swatch = { light: "#a9a294", dark: "#5e5e5e" };
 
 export function communityColour(community: number, theme: Theme): string {
   const slot = COMMUNITY[community];
-  return swatch(slot ?? OUT_OF_PALETTE, theme);
+  return calm(swatch(slot ?? OUT_OF_PALETTE, theme), theme);
 }
 
 export const COMMUNITY_SLOTS = COMMUNITY.length;
 
-/** A language with no entry of its own: named, never given an invented hue. */
-const UNKNOWN_LANGUAGE: Swatch = { light: "#7f8494", dark: "#8b90a0" };
+/**
+ * A language with no entry of its own: named, never given an invented hue.
+ *
+ * Neutral against its own ground rather than against white — a cool grey on
+ * cream reads as a different, unnamed language rather than as "no colour".
+ */
+const UNKNOWN_LANGUAGE: Swatch = { light: "#847d70", dark: "#8f8f8f" };
 
 /** Not code. Drawn far enough back that it never competes with code. */
-const ASSET: Swatch = { light: "#c8cbd6", dark: "#2f323b" };
+const ASSET: Swatch = { light: "#cdc4b2", dark: "#343434" };
 
 /** Hex to HSL and back, so a shade can be taken without a colour library. */
 function toHsl(hex: string): [number, number, number] {
@@ -127,6 +132,42 @@ function toHex(h: number, s: number, l: number): string {
       .toString(16)
       .padStart(2, "0");
   return `#${channel(0)}${channel(8)}${channel(4)}`;
+}
+
+/**
+ * Take a hue down to speaking volume.
+ *
+ * Set against Obsidian, whose nodes are one flat grey, our fully saturated
+ * Tableau ramp is the loudest thing on the canvas — a thousand dots at full
+ * chroma read as a mosaic, and the reader's eye goes to the colours instead of
+ * to the shape they are arranged in. The information is worth keeping: a
+ * colour answers "which part of the codebase is this" across the whole graph
+ * at a glance, which is the one question Obsidian's graph cannot answer at all.
+ * So the hue stays and only its insistence goes.
+ *
+ * Saturation comes down by a bit over a third, and lightness moves a step
+ * toward the background — toward white on a light canvas, toward black on a
+ * dark one. Hue is untouched, because hue is the channel carrying the meaning;
+ * saturation and lightness were only ever carrying emphasis.
+ */
+const CALM_SATURATION: Record<Theme, number> = {
+  // Not the same number in both, because the same chroma is not the same
+  // loudness in both. A saturated dot on white is competing with a bright
+  // surround and loses some of its force to it; the same dot on near-black has
+  // nothing to compete with and reads as a light source. Matching the two by
+  // using one figure left the dark theme visibly shoutier than the light one.
+  light: 0.62,
+  dark: 0.5,
+};
+const CALM_TOWARD_BACKGROUND = 0.14;
+
+function calm(hex: string, theme: Theme): string {
+  const [h, s, l] = toHsl(hex);
+  const settled =
+    theme === "dark"
+      ? l * (1 - CALM_TOWARD_BACKGROUND)
+      : l + (1 - l) * CALM_TOWARD_BACKGROUND;
+  return toHex(h, s * CALM_SATURATION[theme], settled);
 }
 
 /**
@@ -170,7 +211,10 @@ export function languageColour(
   seed = "",
 ): string {
   if (isAsset) return swatch(ASSET, theme);
-  return shade(swatch(LANGUAGE[lang] ?? UNKNOWN_LANGUAGE, theme), seed, theme);
+  return calm(
+    shade(swatch(LANGUAGE[lang] ?? UNKNOWN_LANGUAGE, theme), seed, theme),
+    theme,
+  );
 }
 
 /**
@@ -185,12 +229,8 @@ export const CANVAS: Record<
   Theme,
   {
     background: string;
-    edge: string;
     edgeMuted: string;
-    /** A node pushed into the background while another is being read. */
-    dim: string;
     label: string;
-    labelHalo: string;
     focus: string;
     /**
      * The colour a read neighbourhood is drawn in.
@@ -205,31 +245,40 @@ export const CANVAS: Record<
   }
 > = {
   dark: {
-    background: "#0d0d0f",
-    edge: "#3a3d47",
-    edgeMuted: "#21232a",
-    dim: "#26282f",
-    label: "#e8e8ea",
-    labelHalo: "rgba(13,13,15,0.82)",
-    focus: "#f4f5f8",
+    background: "#1c1c1c",
+    edgeMuted: "#282828",
+    label: "#dadada",
+    focus: "#f2f2f2",
     accent: "#8b7cf6",
   },
   light: {
-    background: "#fbfbfd",
-    edge: "#b4b8c4",
-    edgeMuted: "#e3e5ec",
-    dim: "#dcdee6",
-    label: "#15151a",
-    labelHalo: "rgba(251,251,253,0.86)",
-    focus: "#101014",
-    accent: "#7c5cf0",
+    background: "#fbf9f5",
+    edgeMuted: "#f1ebe0",
+    label: "#222222",
+    focus: "#111111",
+    accent: "#7250e8",
   },
 };
 
-/** The ink an edge is drawn with at full strength, before any thinning. */
+/**
+ * The ink an edge is drawn with, and how wide.
+ *
+ * Measured against Obsidian rather than chosen: their line is `#3f3f3f` on a
+ * `#1e1e1e` background — a step of 33 out of 255, about 13% — and one CSS
+ * pixel wide at every zoom. These are the same step against our own two
+ * backgrounds. Edges are quieter here than the eye expects because there are
+ * thousands of them; the surprise is that Obsidian's are not fainter than
+ * ours ever were, only fewer per square inch.
+ */
 const EDGE_INK: Record<Theme, string> = {
-  dark: "#5c6170",
-  light: "#7a808f",
+  // Dark is Obsidian's `--graph-line` outright: `#3f3f3f` on `#1c1c1c`.
+  //
+  // Light is the same *step* — 37 of 255, their `#dadada` under `#ffffff` —
+  // taken on our cream instead. Its warmth is deliberately about half what the
+  // surface ramp would give at that lightness: a tinted plane reads as paper,
+  // but a tinted hairline reads as a stain. Nearly neutral, on warm ground.
+  dark: "#3f3f3f",
+  light: "#d9d5cd",
 };
 
 /** Straight RGB blend, `weight` of `hex` over `onto`. */
@@ -247,46 +296,45 @@ export function mix(hex: string, onto: string, weight: number): string {
 }
 
 /**
- * How an edge is drawn in a graph of this many edges: its colour and its
- * width, which come down together as the graph gets denser.
+ * How an edge is drawn: one colour, one width, whatever the graph.
  *
- * Three thousand curves at the ink a hundred can carry do not read as three
- * thousand relationships — they read as fog, and the fog is thickest exactly
- * where the graph is busiest and most worth reading.
+ * Both are Obsidian's, and both used to slide with edge count. That ladder
+ * came from the era of the frozen hairball, where three thousand strokes
+ * crossing the same few hundred pixels genuinely did read as fog — and it was
+ * the right fix for a layout whose clusters packed until their members
+ * touched. It is the wrong fix now. `linkDistance` at 250 against a collision
+ * radius of 60 gives the strokes somewhere to be, so there is no fog left to
+ * thin, and all the ladder still did was spend contrast:
  *
- * The colour is **opaque, mixed towards the background** rather than
- * translucent, and that is not a style preference. Sigma's curved-edge program
- * discards the alpha channel: an `rgba(…, 0.05)` edge draws at full strength,
- * which is why an earlier attempt to thin the fog by dropping alpha from 0.55
- * to 0.05 changed nothing on screen. Blending here, in the colour we hand it,
- * is the only way to control how bright a dense core comes out — and because
- * the strokes are opaque they overwrite instead of accumulating, so the value
+ *     3,121 edges → weight 0.70 → dark step 24/255 (9.4%), light 24.5 (9.6%)
+ *     Obsidian                  → dark step 35/255 (13.7%), light 37 (14.5%)
+ *
+ * A third of the separation between an edge and the background, given away to
+ * solve a problem the layout had already solved. Obsidian does not vary either
+ * number with density at all, so neither do we. If a repository ten times
+ * denser than `acme-saas` turns back into fog, that is a measurement away
+ * and a lever can come back with a number attached — but it will not come back
+ * on a guess.
+ *
+ * `size` is a width in CSS pixels, and it is real, which took two fixes.
+ * Sigma's edge shader computes `max(size / sizeRatio, minEdgeThickness)`, and
+ * `minEdgeThickness` defaults to **1.7** — so the old ladder walking `size`
+ * from 0.4 down to 0.18 was clamped straight back to 1.7 px on every step and
+ * changed nothing. And `sizeRatio` is `√cameraRatio`, so left alone an edge
+ * thickens threefold as you zoom into a cluster. Obsidian's line is
+ * `lineSizeMult / scale` in graph units — a constant width on screen at every
+ * magnification — so the canvas multiplies by `√ratio` to cancel sigma's law
+ * and leave the number below as the width actually drawn.
+ *
+ * The colour is **opaque** rather than translucent, and that is not a style
+ * preference. Sigma's curved-edge program discards the alpha channel: an
+ * `rgba(…, 0.05)` edge draws at full strength, which is why an earlier attempt
+ * to thin the fog by dropping alpha from 0.55 to 0.05 changed nothing on
+ * screen. Opaque strokes also overwrite instead of accumulating, so the value
  * chosen is exactly the value drawn, however many edges cross.
- *
- * It steps rather than slides: a continuous function would make two scans of
- * the same repository a week apart look subtly different for no reason a
- * reader could name.
  */
-export function edgeInk(
-  edges: number,
-  theme: Theme,
-): { color: string; size: number } {
-  // Fainter than it was at every step. Obsidian's edges sit almost at the
-  // background and the graph reads as nodes with relationships; ours read as
-  // relationships with nodes in them. Weight is how much ink survives the
-  // blend towards the background, so lower is quieter.
-  const [weight, size] =
-    edges <= 400
-      ? [0.62, 0.4]
-      : edges <= 1200
-        ? [0.4, 0.3]
-        : edges <= 2500
-          ? [0.26, 0.22]
-          : [0.18, 0.18];
-  return {
-    color: mix(EDGE_INK[theme], CANVAS[theme].background, weight),
-    size,
-  };
+export function edgeInk(theme: Theme): { color: string; size: number } {
+  return { color: EDGE_INK[theme], size: 1 };
 }
 
 export type CanvasTheme = (typeof CANVAS)[Theme] & { mode: Theme };

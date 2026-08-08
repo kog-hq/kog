@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 import { createNodeBorderProgram } from "@sigma/node-border";
 import { buildGraph, type ColourBy } from "./build";
 import type { Communities } from "./communities";
+import { startPhysics, type Physics, PHYSICS } from "./physics";
 import {
   canvasTheme,
   communityColour,
@@ -17,16 +18,6 @@ import {
   type Theme,
 } from "@/lib/palette";
 import type { KogProject, ProjectIndex } from "@/lib/kog";
-// THROWAWAY SPIKE — delete with `spike-d3.ts`.
-import {
-  onSpikeFreeze,
-  spikeGrab,
-  spikeMove,
-  spikeHot,
-  spikeOn,
-  spikeRelease,
-  startSpike,
-} from "./spike-d3";
 
 export type LabelMode = "none" | "hubs" | "more" | "all";
 
@@ -48,14 +39,32 @@ export type LabelMode = "none" | "hubs" | "more" | "all";
 export type EdgeMode = "none" | "linked" | "all";
 
 /**
- * How many names are on screen at once. Sigma decides by drawn size, so the
- * threshold is what separates "the five hubs" from "everything".
+ * How names behave, as two independent questions.
+ *
+ * `threshold` and `density` are sigma's: they pick *which* nodes are allowed a
+ * label at all. `zoom` is Obsidian's, and it decides *whether any name is
+ * drawn at this magnification*:
+ *
+ *     textAlpha = clamp(log2(scale) + 1 - textFadeMultiplier, 0, 1)
+ *
+ * That single line is why their graph has no labels on it at rest. Zoomed out
+ * to fit a vault, `log2(scale)` is around -1.9 and every name is at alpha
+ * zero; names appear, continuously, as you come in. Ours were a mode you set
+ * and then had to live with, so the overview arrived pre-covered in text —
+ * which is the complaint, exactly.
+ *
+ * `zoom` is the camera ratio at which names reach full strength; they are gone
+ * by twice it. Sigma's ratio counts the other way from Obsidian's scale, so
+ * the sign is flipped and the shape is the same.
  */
-const LABEL_MODES: Record<LabelMode, { threshold: number; density: number }> = {
-  none: { threshold: Infinity, density: 1 },
-  hubs: { threshold: 12, density: 1 },
-  more: { threshold: 5, density: 2 },
-  all: { threshold: 0, density: 20 },
+const LABEL_MODES: Record<
+  LabelMode,
+  { threshold: number; density: number; zoom: number }
+> = {
+  none: { threshold: Infinity, density: 1, zoom: 0 },
+  hubs: { threshold: 12, density: 1, zoom: 0.22 },
+  more: { threshold: 5, density: 2, zoom: 0.45 },
+  all: { threshold: 0, density: 20, zoom: 1.6 },
 };
 
 /** Every name on a small graph, only the hubs on a large one. */
@@ -91,37 +100,85 @@ const LABEL_ALL_NEIGHBOURS_UP_TO = 40;
 const TRAVEL_MS = 320;
 
 /**
- * How long the pointer must rest on a node before its neighbourhood lights up.
+ * How far the graph recedes behind whatever is being read.
  *
- * This is the whole difference between the effect and the strobe. Answering a
- * hover instantly means dragging the pointer across a dense cluster fires on
- * every node it crosses; waiting for the pointer to stop means the effect only
- * ever runs when someone is actually looking at something.
+ * Obsidian's `QQ = .2`, lifted whole. Not zero: the shape of the whole is the
+ * context that makes a neighbourhood mean anything, and a fifth of full
+ * strength is enough to keep it there without competing.
  */
-const HOVER_DELAY_MS = 90;
+const DIMMED = 0.2;
 
 /**
- * How long the rest of the graph takes to fade back, in milliseconds.
+ * How fast the graph fades, as the fraction of the gap left standing per frame
+ * at 60 Hz.
  *
- * 180 was too fast to read as a transition at all: after the hover delay it
- * looked like the graph simply switched states. And since hovering already
- * runs the fade, a click on the node under the pointer then had nothing left
- * to animate — which is why clicking appeared to have no transition even
- * though the code had one.
+ * This is Obsidian's whole animation, and it is three tokens long:
+ *
+ *     $Q = function(e, t, n) { return void 0===n && (n=.9), e*n + t*(1-n) }
+ *
+ * applied to every alpha on every rendered frame. It is not a transition with
+ * a duration — there is no start, no end and no easing curve to choose. The
+ * value simply chases its target, quickly at first and ever more gently, and
+ * it is already chasing a new target if you move the pointer mid-flight.
+ *
+ * That is the difference the eye reads as "soft". Our previous fade was a
+ * 320 ms tween started on a state change: interrupt it and it restarts from
+ * wherever it was toward a new end point, which is why it read as switching
+ * rather than gliding. A damped value cannot be interrupted, because it was
+ * never following a plan.
+ *
+ * Applied per frame it would run twice as fast on a 120 Hz display, so the
+ * exponent below is corrected by elapsed time. At 60 Hz that is exactly
+ * Obsidian's number; the time constant is about 158 ms either way.
  */
-const FADE_MS = 320;
+const FADE_DAMP_AT_60HZ = 0.9;
 
 /**
- * How many distinct steps the fade is quantised to.
+ * How close to its target the fade has to be before the loop stops.
  *
- * Blending a colour means parsing two hex strings and formatting a third, and
- * the dimmed set is most of the graph — at 60 frames a second on 2,800 nodes
- * that is a quarter of a million string operations per second, which is what
- * made the fade stutter rather than glide. Quantising lets the results be
- * cached: sixteen steps is more than the eye resolves over 180 ms, and it
- * turns the per-frame cost into a map lookup.
+ * An exponential never actually arrives, so something has to call it, and the
+ * honest place to stop is the frame on which the picture stops changing. A
+ * node moves at most `1 - DIMMED` of the way from its own colour to the
+ * background, so a change in the fade smaller than `1/255 / 0.8` cannot move
+ * any channel by a whole value. Below that the loop would be repainting 2,800
+ * nodes to produce an identical image.
  */
-const FADE_STEPS = 16;
+const FADE_SETTLED = 1 / 255 / (1 - DIMMED);
+
+/**
+ * The fixed extent, in graph units, that the drawn coordinate space is pinned
+ * to — and the reason dragging a node no longer drags the world with it.
+ *
+ * Sigma normalises graph coordinates into 0..1 before drawing, and by default
+ * it rebuilds that mapping from the graph's own bounding box on every full
+ * refresh:
+ *
+ *     this.nodeExtent = graphExtent(this.graph);
+ *     this.normalizationFunction = createNormalizationFunction(
+ *       this.customBBox || this.nodeExtent);
+ *
+ * On a frozen layout that is invisible. On a live one it means the picture is
+ * rescaled and recentred around whatever the outermost node is doing: pull one
+ * file toward the top of the screen and the box grows, so every other node is
+ * squeezed and slid to compensate, and the whole graph appears to follow the
+ * cursor. Obsidian has no such step — it draws in absolute coordinates and
+ * moves only the camera.
+ *
+ * A `customBBox` overrides the mapping and freezes it. The size is derived
+ * from the node count rather than fixed, because the layout's own radius grows
+ * as √n: the centre force at 0.1 balances repulsion at -1000 around
+ * r ≈ 100·√n. Scaling the box the same way means a 64-file project and a
+ * 2,800-file one both settle into a similar fraction of the frame, so one set
+ * of camera ratios and one label calibration hold across every repository
+ * instead of being tuned for whichever one was open.
+ *
+ * Nothing is clipped by it: the mapping is affine, and a node outside the box
+ * simply lands outside 0..1 and draws normally.
+ */
+function drawnExtent(order: number): { x: [number, number]; y: [number, number] } {
+  const bound = Math.max(2000, 130 * Math.sqrt(order)) * 1.15;
+  return { x: [-bound, bound], y: [-bound, bound] };
+}
 
 function prefersReducedMotion(): boolean {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -131,7 +188,7 @@ export type CanvasState = {
   /** Ids that pass the current filters. Everything else is hidden. */
   visible: Set<string> | null;
   selected: string | null;
-  /** Anything the pointer is deliberately on, in a side panel. */
+  /** What the pointer is on, whether in the canvas or in a side panel. */
   hovered: string | null;
   labelMode: LabelMode;
   edgeMode: EdgeMode;
@@ -158,6 +215,9 @@ type Props = CanvasState & {
   capture: React.RefObject<(() => string | null) | null>;
 };
 
+/** What the reducers hand the label drawer, on top of sigma's own fields. */
+type LabelData = { labelFade?: number };
+
 /**
  * Draw a node's name centred beneath it.
  *
@@ -167,11 +227,16 @@ type Props = CanvasState & {
  * and the real complaint was never legibility but noise. Faint edges make the
  * halo unnecessary; the halo never made the edges quieter.
  *
- * The colour comes from the reducer as `labelInk`, so a name fades with the
- * node it belongs to instead of being switched off at some threshold. A hard
- * cut is what reads as flicker while the pointer moves.
+ * Alpha is the product of two independent things, which is Obsidian's `y *= s`
+ * exactly: how far the camera is out, and how far this particular node has
+ * receded behind whatever is being read. A name being read is exempt from the
+ * first — see `forceLabel`.
  */
-function labelDrawer(theme: CanvasTheme, bold = false) {
+function labelDrawer(
+  theme: CanvasTheme,
+  zoomAlpha: { current: number },
+  bold = false,
+) {
   return (
     context: CanvasRenderingContext2D,
     data: PartialButFor<
@@ -181,10 +246,23 @@ function labelDrawer(theme: CanvasTheme, bold = false) {
     settings: Settings,
   ): void => {
     if (!data.label) return;
+    const fade = (data as LabelData).labelFade ?? 1;
+    // A forced label is one the reader asked for by pointing or clicking, and
+    // it is legible at any magnification. Everything else lives or dies by the
+    // camera.
+    const alpha = (data.forceLabel ? 1 : zoomAlpha.current) * fade;
+    if (alpha < 0.02) return;
+
     const size = settings.labelSize;
     context.font = `${bold ? 600 : settings.labelWeight} ${size}px ${settings.labelFont}`;
-    const ink = (data as { labelInk?: string }).labelInk;
-    context.fillStyle = bold ? theme.focus : (ink ?? theme.label);
+    // Blended towards the background rather than set as a globalAlpha: the
+    // canvas is opaque, so the two are identical on screen, and a blend costs
+    // no state change on a context drawing hundreds of names.
+    context.fillStyle = mix(
+      bold ? theme.focus : theme.label,
+      theme.background,
+      alpha,
+    );
     context.textAlign = "center";
     context.fillText(data.label, data.x, data.y + data.size + size + 2);
     context.textAlign = "left";
@@ -192,16 +270,14 @@ function labelDrawer(theme: CanvasTheme, bold = false) {
 }
 
 /**
- * Hovering a node reads its name. That is the whole of it.
+ * Hovering a node reads its name, in the focus ink.
  *
- * An earlier version answered a hover the way it answers a click: dim the
- * graph, light the neighbourhood, breathe a ring around the node. Dragging
- * the pointer across a dense cluster then fired that on every node it crossed,
- * and the graph strobed. Pointing at something is not the same act as asking
- * about it — the second one is a click, and it still gets the full answer.
+ * The rest of the answer to a hover — the graph receding, the neighbourhood
+ * staying lit — is in the reducers, and it arrives as a fade rather than as a
+ * switch. Sigma draws this one on top of everything else.
  */
-function hoverDrawer(theme: CanvasTheme) {
-  return labelDrawer(theme, true);
+function hoverDrawer(theme: CanvasTheme, zoomAlpha: { current: number }) {
+  return labelDrawer(theme, zoomAlpha, true);
 }
 
 /**
@@ -247,6 +323,14 @@ function extent(points: { x: number; y: number }[]) {
   return { minX, minY, maxX, maxY };
 }
 
+/** The anchor for highlighting, and the two directions around it. */
+type Focus = {
+  anchor: string;
+  uses: Set<string>;
+  usedBy: Set<string>;
+  nameThem: boolean;
+} | null;
+
 export function GraphCanvas(props: Props) {
   const {
     project,
@@ -267,11 +351,32 @@ export function GraphCanvas(props: Props) {
 
   const container = useRef<HTMLDivElement>(null);
   const sigma = useRef<Sigma | null>(null);
+  const physics = useRef<Physics | null>(null);
   // Read by the edge reducer on every repaint, written when the camera
   // settles. A ref rather than state: it must not re-render React.
   const onScreen = useRef<Box>(null);
   /** How far the graph has faded back behind whatever is being read, 0 to 1. */
   const fade = useRef(0);
+  /**
+   * What is being read, as a ref rather than a reducer dependency.
+   *
+   * The reducers used to be re-registered and the graph fully re-indexed every
+   * time this changed, which on a hover is every node the pointer crosses. A
+   * full `refresh()` over 2,800 nodes per pointer sample is why answering a
+   * hover had to be delayed by 90 ms to stay usable at all — and that delay is
+   * what made hovering feel like operating a switch. Obsidian assigns a
+   * variable and lets the next frame read it; so does this.
+   */
+  const focused = useRef<Focus>(null);
+  /** Label strength from the camera alone, before any node's own fade. */
+  const zoomAlpha = useRef(1);
+  /**
+   * What an edge's width must be multiplied by to come out the same on screen
+   * at any zoom. See `edgeInk` and the edge reducer.
+   */
+  const edgeScale = useRef(1);
+  /** The camera ratio at which names reach full strength. */
+  const labelZoom = useRef(LABEL_MODES[labelMode].zoom);
 
   // The layout is the expensive part, so it is tied to what actually changes
   // its shape: the project and whether folders are collapsed. Filters,
@@ -284,6 +389,13 @@ export function GraphCanvas(props: Props) {
     [project, index, communities, groupByFolder],
   );
 
+  /** Names fade with the camera, continuously. See `LABEL_MODES`. */
+  const readZoom = useCallback((ratio: number) => {
+    const zoom = labelZoom.current;
+    if (zoom <= 0) return 0;
+    return Math.min(1, Math.max(0, 1 - Math.log2(ratio / zoom)));
+  }, []);
+
   /**
    * Bring a set of nodes into view.
    *
@@ -293,35 +405,36 @@ export function GraphCanvas(props: Props) {
    * parked in a row below the graph, off screen. The reader's conclusion is
    * that the files are not there.
    */
-  const frame = useCallback((ids: string[], travel: boolean) => {
-    const renderer = sigma.current;
-    if (!renderer) return;
-    const points = ids
-      .map((id) => renderer.getNodeDisplayData(id))
-      .filter((point) => point !== undefined);
-    if (points.length === 0) return;
+  const frame = useCallback(
+    (ids: string[], travel: boolean) => {
+      const renderer = sigma.current;
+      if (!renderer) return;
+      const points = ids
+        .map((id) => renderer.getNodeDisplayData(id))
+        .filter((point) => point !== undefined);
+      if (points.length === 0) return;
 
-    const { minX, minY, maxX, maxY } = extent(points);
-    const span = Math.max(maxX - minX, maxY - minY, 0.06);
-    const state = {
-      x: (minX + maxX) / 2,
-      y: (minY + maxY) / 2,
-      ratio: Math.min(Math.max(span * 1.35, 0.08), 1.2),
-    };
+      const { minX, minY, maxX, maxY } = extent(points);
+      const span = Math.max(maxX - minX, maxY - minY, 0.06);
+      const state = {
+        x: (minX + maxX) / 2,
+        y: (minY + maxY) / 2,
+        ratio: Math.min(Math.max(span * 1.35, 0.08), 3),
+      };
+      zoomAlpha.current = readZoom(state.ratio);
 
-    if (travel && !prefersReducedMotion()) {
-      renderer
-        .getCamera()
-        .animate(state, { duration: TRAVEL_MS, easing: "quadraticInOut" });
-    } else {
-      renderer.getCamera().setState({ ...state, angle: 0 });
-    }
-  }, []);
+      if (travel && !prefersReducedMotion()) {
+        renderer
+          .getCamera()
+          .animate(state, { duration: TRAVEL_MS, easing: "quadraticInOut" });
+      } else {
+        renderer.getCamera().setState({ ...state, angle: 0 });
+      }
+    },
+    [readZoom],
+  );
 
-  /** The anchor for highlighting, and the two directions around it. */
-  const focus = useMemo(() => {
-    // `hovered` only ever comes from a deliberate point in a side panel now;
-    // the canvas itself no longer reports what the pointer passes over.
+  const focus = useMemo<Focus>(() => {
     const anchor = hovered ?? selected;
     if (!anchor || groupByFolder) return null;
     const uses = new Set(index.dependencies.get(anchor) ?? []);
@@ -340,9 +453,10 @@ export function GraphCanvas(props: Props) {
   useEffect(() => {
     if (!container.current) return;
     const canvas = canvasTheme(theme);
+    const ink = edgeInk(theme);
     const renderer = new Sigma(graph, container.current, {
       renderEdgeLabels: false,
-      defaultEdgeColor: edgeInk(graph.size, theme).color,
+      defaultEdgeColor: ink.color,
       // Arrows are registered but never the default: 3,000 arrowheads at low
       // zoom is noise. The reducer promotes an edge to an arrow only while it
       // is being read.
@@ -360,31 +474,37 @@ export function GraphCanvas(props: Props) {
         line: EdgeRectangleProgram,
         arrow: EdgeArrowProgram,
       },
+      // Sigma's floor on how thin an edge may be drawn, in pixels. It defaults
+      // to 1.7, and until it was lowered here every width `edgeInk` chose was
+      // clamped straight back up to it — the whole density ladder was
+      // decorative. Now that the reducer sets a real width, this is only a
+      // guard against an edge thinning into nothing.
+      minEdgeThickness: 0.5,
+      // See `drawnExtent`. Together these are what stop the picture from
+      // rescaling itself around a dragged node.
+      autoRescale: false,
       // The camera can no longer be flown into empty space. Zooming past
       // these is never useful: below `min` a single node fills the frame,
       // above `max` the graph is a smudge.
-      minCameraRatio: 0.05,
-      maxCameraRatio: 4,
+      minCameraRatio: 0.02,
+      maxCameraRatio: 6,
       defaultNodeType: "bordered",
       nodeProgramClasses: { bordered: NodeWithRing },
       labelFont: '"JetBrains Mono Variable", ui-monospace, monospace',
       labelSize: 11.5,
       labelWeight: "500",
       labelGridCellSize: 72,
-      defaultDrawNodeLabel: labelDrawer(canvas),
-      defaultDrawNodeHover: hoverDrawer(canvas),
+      defaultDrawNodeLabel: labelDrawer(canvas, zoomAlpha),
+      defaultDrawNodeHover: hoverDrawer(canvas, zoomAlpha),
       zIndex: true,
     });
+    renderer.setCustomBBox(drawnExtent(graph.order));
     sigma.current = renderer;
-    // The layout's extent changes with the graph, so the camera is framed on
-    // what was actually drawn rather than left wherever the previous one sat.
-    // THROWAWAY SPIKE — a wider ratio, because framing the seed would fit the
-    // compact cluster moments before the graph leaves it. The camera holds
-    // while it blooms; one frame at freeze fits what was actually drawn.
-    renderer
-      .getCamera()
-      .setState({ x: 0.5, y: 0.5, ratio: spikeOn ? 3.2 : 1.05, angle: 0 });
-    if (!spikeOn) frame(graph.nodes(), false);
+
+    // A wide ratio to start, because framing the seed would fit the compact
+    // knot moments before the graph leaves it. The camera holds while it
+    // blooms; one frame at settle fits what was actually drawn.
+    renderer.getCamera().setState({ x: 0.5, y: 0.5, ratio: 1.6, angle: 0 });
 
     renderer.on("clickNode", ({ node }) => onSelect(node));
     renderer.on("clickStage", () => onSelect(null));
@@ -399,30 +519,63 @@ export function GraphCanvas(props: Props) {
       preventSigmaDefault(),
     );
 
-    // Hover, after the pointer has stopped. See `HOVER_DELAY_MS`.
-    let resting: number | undefined;
+    // Hover answers immediately. There used to be a 90 ms delay here so that
+    // dragging the pointer across a dense cluster would not fire on every node
+    // it crossed — but the strobing that was meant to prevent came from the
+    // effect being a hard switch, not from how often it fired. A damped fade
+    // crossing five nodes in five frames simply never gets far from where it
+    // was. Obsidian has no delay either.
     renderer.on("enterNode", ({ node }) => {
+      // Held nodes keep their own cursor and their own highlight. Without this
+      // guard a drag flickers: the node slides out from under the pointer,
+      // sigma reports a leave and then an enter, and each one overwrites the
+      // grab cursor and the thing being read.
+      if (dragging) return;
       // A node is clickable and draggable, so it should say so before you
       // find out by trying.
       if (container.current) container.current.style.cursor = "pointer";
-      window.clearTimeout(resting);
-      resting = window.setTimeout(() => onHover(node), HOVER_DELAY_MS);
+      onHover(node);
     });
     renderer.on("leaveNode", () => {
+      if (dragging) return;
       if (container.current) container.current.style.cursor = "";
-      window.clearTimeout(resting);
       onHover(null);
     });
 
+    const engine = startPhysics(graph);
+    physics.current = engine;
+
+    if (import.meta.env.DEV) {
+      // A handle for tuning from the console, and for driving the canvas from
+      // a browser test — a WebGL canvas has no DOM to assert against, so
+      // without this the only way to check that a drag moved a node rather
+      // than the camera is to look at a screenshot and guess. Vite drops the
+      // whole block from a production build.
+      (window as unknown as Record<string, unknown>).__kog = {
+        renderer,
+        physics: engine,
+        forces: PHYSICS,
+      };
+    }
+
     // Dragging a node. The camera is disabled for the duration, or the drag
     // pans the view instead of moving the node.
-    let dragged: string | null = null;
-    renderer.on("downNode", ({ node }) => {
-      dragged = node;
-      if (container.current) container.current.style.cursor = "grabbing";
+    let pressed: string | null = null;
+    let pressedAt: { x: number; y: number } | null = null;
+    let dragging = false;
+    const onDownNode = ({
+      node,
+      event,
+    }: {
+      node: string;
+      event: { x: number; y: number };
+    }) => {
+      pressed = node;
+      pressedAt = { x: event.x, y: event.y };
+      dragging = false;
       renderer.getCamera().disable();
-      spikeGrab(node); // THROWAWAY SPIKE
-    });
+    };
+    renderer.on("downNode", onDownNode);
     const mouse = renderer.getMouseCaptor();
     const onMove = (event: {
       x: number;
@@ -430,7 +583,23 @@ export function GraphCanvas(props: Props) {
       preventSigmaDefault: () => void;
       original: Event;
     }) => {
-      if (!dragged) return;
+      if (!pressed || !pressedAt) return;
+      if (!dragging) {
+        // A press only becomes a drag once the pointer has actually travelled.
+        // Obsidian's threshold, and without it every click nudges the node it
+        // lands on — a graph you cannot click without disturbing is a graph
+        // you stop clicking.
+        const dx = event.x - pressedAt.x;
+        const dy = event.y - pressedAt.y;
+        if (dx * dx + dy * dy <= PHYSICS.dragSlopSquared) return;
+        dragging = true;
+        if (container.current) container.current.style.cursor = "grabbing";
+        // A dragged node reads as a held one: Obsidian highlights
+        // `dragNode || highlightNode`, so the neighbourhood you are pulling
+        // stays lit while you pull it.
+        onHover(pressed);
+        engine.grab(pressed);
+      }
       // Held inside the frame. Dragging a node past the edge used to keep
       // pulling — the pointer left the canvas, the spring stayed stretched,
       // and the centre force dragged the whole graph after it, so the picture
@@ -441,14 +610,9 @@ export function GraphCanvas(props: Props) {
         x: Math.min(width, Math.max(0, event.x)),
         y: Math.min(height, Math.max(0, event.y)),
       });
-      // THROWAWAY SPIKE — with a solver running, the node is moved by pinning
-      // it, not by writing its position: writing would fight the next tick.
-      if (spikeOn) {
-        spikeMove(at.x, at.y);
-      } else {
-        graph.setNodeAttribute(dragged, "x", at.x);
-        graph.setNodeAttribute(dragged, "y", at.y);
-      }
+      // With a solver running, the node is moved by pinning it, not by writing
+      // its position: a write would fight the next tick.
+      engine.moveTo(at.x, at.y);
       // Sigma would otherwise also pan; the browser would otherwise select
       // text across the page while the button is held.
       event.preventSigmaDefault();
@@ -456,35 +620,72 @@ export function GraphCanvas(props: Props) {
       event.original.stopPropagation();
     };
     const onRelease = () => {
-      if (!dragged) return;
-      dragged = null;
-      spikeRelease(); // THROWAWAY SPIKE
-      if (container.current) container.current.style.cursor = "pointer";
+      if (!pressed) return;
+      pressed = null;
+      pressedAt = null;
+      if (dragging) engine.release();
+      dragging = false;
+      if (container.current) container.current.style.cursor = "";
       renderer.getCamera().enable();
     };
     mouse.on("mousemovebody", onMove);
-    mouse.on("mouseup", onRelease);
-    mouse.on("mouseleave", onRelease);
+    // A drag ends when the button comes up, wherever the pointer happens to be
+    // — hence `window` and not the canvas.
+    //
+    // It used to end on `mouseleave` as well, and that one line was most of
+    // "dragging a node takes the whole graph with it". Pull a node toward the
+    // top of the screen — the gesture the complaint was about — and the
+    // pointer crosses out of the canvas partway through. `mouseleave` then
+    // ended the drag and, worse, re-enabled the camera *mid-gesture*, so every
+    // remaining millimetre of the same movement panned the view instead. The
+    // graph appeared to follow the cursor off the top of the window because
+    // that is exactly what it was doing.
+    //
+    // Sigma emits `mousemovebody` precisely so a drag can survive leaving the
+    // container. Leaving is not letting go.
+    window.addEventListener("mouseup", onRelease);
 
     // Recompute what is on screen once the camera settles, and repaint.
     //
     // Debounced rather than per-frame: the edge set only has to be right when
     // someone is looking at it, and re-running the reducers over 2,800 nodes
-    // on every frame of a drag would cost far more than it buys.
+    // on every frame of a drag would cost far more than it buys. Label
+    // strength is not debounced — it is one logarithm, and it has to track the
+    // wheel rather than arrive after it.
     let settle: number | undefined;
+    let lastRatio = renderer.getCamera().ratio;
+    edgeScale.current = Math.sqrt(lastRatio);
     const onCamera = () => {
-      // Keep the graph reachable. Sigma's camera lives in a space where the
-      // laid-out graph occupies roughly 0..1 on each axis, so clamping the
-      // centre to a fifth beyond that box means a pan can never leave you
-      // staring at blank canvas with no way back. Written only when it is
-      // actually out of bounds — `setState` re-fires this handler.
+      // Rule 3 of this file: every callback that can outlive its renderer has
+      // to re-check that it is still the live one. This handler used to be
+      // exempt in practice, because all it did was schedule a debounced
+      // refresh and *that* carried the guard. Repainting synchronously on a
+      // change of zoom moved the danger up here — a camera animation still in
+      // flight when the project changes reaches a killed renderer and throws
+      // on its own node programs.
+      if (sigma.current !== renderer) return;
+      // Keep the graph reachable. The drawn space is now fixed rather than
+      // fitted to the graph, so clamping the centre to a little beyond 0..1
+      // means a pan can never leave you staring at blank canvas with no way
+      // back. Written only when it is actually out of bounds — `setState`
+      // re-fires this handler.
       const camera = renderer.getCamera();
       const state = camera.getState();
-      const x = Math.min(1.2, Math.max(-0.2, state.x));
-      const y = Math.min(1.2, Math.max(-0.2, state.y));
+      const x = Math.min(1.3, Math.max(-0.3, state.x));
+      const y = Math.min(1.3, Math.max(-0.3, state.y));
       if (x !== state.x || y !== state.y) {
         camera.setState({ ...state, x, y });
         return;
+      }
+      // Zoom changes what a name and a line look like; panning does not. So
+      // the two are answered differently: a change of ratio repaints at once,
+      // because a width that arrives 90 ms after the wheel is a width that
+      // visibly snaps, while the pan-dependent edge culling below can wait.
+      if (state.ratio !== lastRatio) {
+        lastRatio = state.ratio;
+        zoomAlpha.current = readZoom(state.ratio);
+        edgeScale.current = Math.sqrt(state.ratio);
+        renderer.refresh({ skipIndexation: true });
       }
       window.clearTimeout(settle);
       settle = window.setTimeout(() => {
@@ -498,19 +699,29 @@ export function GraphCanvas(props: Props) {
     renderer.getCamera().on("updated", onCamera);
     onScreen.current = viewportOf(renderer);
 
-    // THROWAWAY SPIKE — a full refresh at freeze, not a skipIndexation one:
-    // the spatial index and the label grid are both a second out of date after
-    // a bloom, so hover would point at where nodes used to be.
-    // THROWAWAY SPIKE — started here, on the graph this renderer is drawing,
-    // and stopped with it.
-    const stopSpike = startSpike(graph);
-
-    const unsubscribe = onSpikeFreeze((first) => {
-      // Switching project between the last tick and `end` leaves this handler
-      // holding a renderer React has already killed, and refreshing one throws
-      // on its own node programs. The freeze callback has to be scoped to the
-      // renderer that is still on screen.
+    // Sigma sizes itself from its container, but only re-reads that size on a
+    // **window** resize — it installs no `ResizeObserver`. Every other way the
+    // canvas can change width therefore went unnoticed, and closing the side
+    // column is now one of them: the window never resizes, so the drawing
+    // buffer stays at the old width and the graph is drawn into a frame that
+    // no longer exists. Observing the container covers all of them at once.
+    const resized = new ResizeObserver(() => {
       if (sigma.current !== renderer) return;
+      renderer.resize();
+      onScreen.current = viewportOf(renderer);
+      renderer.refresh({ skipIndexation: true });
+    });
+    resized.observe(container.current);
+
+    const unsubscribe = engine.onSettle((first) => {
+      // Switching project between the last tick and the settle leaves this
+      // handler holding a renderer React has already killed, and refreshing
+      // one throws on its own node programs. The callback has to be scoped to
+      // the renderer that is still on screen.
+      if (sigma.current !== renderer) return;
+      // A full refresh, not a `skipIndexation` one: the spatial index and the
+      // label grid are both a second out of date after a bloom, so hover would
+      // otherwise point at where nodes used to be.
       renderer.refresh();
       onScreen.current = viewportOf(renderer);
       // Only the first settle fits the camera. Every drag reheats the solver
@@ -520,78 +731,119 @@ export function GraphCanvas(props: Props) {
       if (first) frame(graph.nodes(), true);
     });
 
+    // Reduced motion runs the solver to a standstill inside `startPhysics`
+    // without ever firing an end event, so the one framing it is owed happens
+    // here instead.
+    if (prefersReducedMotion()) {
+      renderer.refresh();
+      onScreen.current = viewportOf(renderer);
+      frame(graph.nodes(), false);
+    }
+
     return () => {
-      stopSpike();
+      resized.disconnect();
+      engine.stop();
+      physics.current = null;
       unsubscribe();
       window.clearTimeout(settle);
-      window.clearTimeout(resting);
       mouse.off("mousemovebody", onMove);
-      mouse.off("mouseup", onRelease);
-      mouse.off("mouseleave", onRelease);
+      window.removeEventListener("mouseup", onRelease);
+      // The camera outlives nothing here, but the listener was never removed
+      // and a leaked one is how the guard above came to be needed.
+      renderer.getCamera().off("updated", onCamera);
       renderer.kill();
       sigma.current = null;
     };
     // Deliberately not keyed on the theme: colours are decided in the
     // reducers, so a theme change is a repaint and never a rebuild.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [graph, onSelect, onHover, frame]);
+  }, [graph, onSelect, onHover, frame, readZoom]);
 
   /**
-   * Fade the rest of the graph back, rather than switching it off.
+   * Chase the fade toward its target, one damped step per frame.
    *
-   * A hard cut is what read as a flash. The loop runs for `FADE_MS` and then
-   * stops on its own — an idle canvas still costs nothing.
+   * The loop runs until the gap closes and then stops on its own; an idle
+   * canvas still costs nothing. Because the value is damped rather than
+   * tweened, a hover that arrives mid-flight needs no special handling — it
+   * changes the target and the next frame carries on from wherever the value
+   * had got to.
    */
   useEffect(() => {
     const renderer = sigma.current;
     if (!renderer) return;
+    focused.current = focus;
     const target = focus ? 1 : 0;
+
     if (prefersReducedMotion()) {
       fade.current = target;
       renderer.refresh({ skipIndexation: true });
       return;
     }
-    const from = fade.current;
-    if (from === target) return;
-    const started = performance.now();
+
     let raf = 0;
-    const step = () => {
+    let last = performance.now();
+    const step = (now: number) => {
       // This effect is keyed on `focus` alone, so a graph change swaps the
       // renderer underneath a loop that is still in flight. Refreshing a
       // killed renderer throws on its own node programs. Latent until the
       // layout became live — now the loop is nearly always running.
       if (sigma.current !== renderer) return;
-      const progress = Math.min(1, (performance.now() - started) / FADE_MS);
-      // Ease out: fast enough to feel like a response, slow enough not to snap.
-      fade.current = from + (target - from) * progress * (2 - progress);
+      const elapsed = Math.min(64, now - last);
+      last = now;
+      const keep = Math.pow(FADE_DAMP_AT_60HZ, elapsed / (1000 / 60));
+      fade.current = fade.current * keep + target * (1 - keep);
+      const remaining = Math.abs(target - fade.current);
+      if (remaining < FADE_SETTLED) fade.current = target;
       renderer.refresh({ skipIndexation: true });
-      if (progress < 1) raf = requestAnimationFrame(step);
+      if (remaining >= FADE_SETTLED) raf = requestAnimationFrame(step);
     };
     raf = requestAnimationFrame(step);
     return () => cancelAnimationFrame(raf);
   }, [focus]);
 
-  // Filtering, selection and hover are all one repaint: sigma asks these
-  // reducers what each node and edge looks like right now.
+  // Filtering, selection and colour are one repaint: sigma asks these reducers
+  // what each node and edge looks like right now. Hover is deliberately absent
+  // from the dependencies — it arrives through `focused` and costs a frame, not
+  // a re-registration. See that ref.
   useEffect(() => {
     const renderer = sigma.current;
     if (!renderer) return;
     const canvas = canvasTheme(theme);
-    const ink = edgeInk(graph.size, theme);
+    const ink = edgeInk(theme);
 
-    // Keyed by target, fill and step, and rebuilt whenever the palette can
-    // change. Nodes fade towards `dim`, edges towards `edgeMuted` — an edge
-    // has to go further to stop competing, because there are thousands of
-    // them crossing each other.
-    const dimmed = new Map<string, string>();
-    const towards = (target: string, fill: string, away: number): string => {
-      const step = Math.round(away * FADE_STEPS);
-      const key = `${target}|${fill}|${step}`;
-      const cached = dimmed.get(key);
+    // Everything recedes towards the background rather than towards a mid
+    // grey: the grey turned the rest of a 900-node graph into one solid slab,
+    // where receding towards the background is what "further away" actually
+    // looks like.
+    //
+    // The blend is exact. It used to be quantised to sixteen steps so the
+    // results could be cached — blending means parsing two hex strings and
+    // formatting a third, and doing that for 2,800 nodes sixty times a second
+    // is a quarter of a million string operations per second. But sixteen
+    // steps across the fade is a step of 5% of the distance between a node's
+    // colour and the background, and on a saturated fill that is ten values
+    // per channel: visible banding. The fade was stepping because it had been
+    // told to.
+    //
+    // The cache was keyed wrongly, is all. Within one frame `fade` does not
+    // change, so neither does `strength` — the only thing that varies across
+    // the 2,800 calls is the fill. Keyed on the fill alone and cleared
+    // whenever the strength moves, the same map answers every node from at
+    // most a few dozen entries: eleven community colours, or a language and
+    // folder shade per area. Cheaper than the quantised version was, and with
+    // nothing rounded off.
+    const blended = new Map<string, string>();
+    let blendedAt = Number.NaN;
+    const towards = (fill: string, strength: number): string => {
+      if (strength !== blendedAt) {
+        blended.clear();
+        blendedAt = strength;
+      }
+      const cached = blended.get(fill);
       if (cached !== undefined) return cached;
-      const blended = mix(target, fill, step / FADE_STEPS);
-      dimmed.set(key, blended);
-      return blended;
+      const value = mix(fill, canvas.background, strength);
+      blended.set(fill, value);
+      return value;
     };
 
     renderer.setSetting("nodeReducer", (node, data) => {
@@ -609,6 +861,7 @@ export function GraphCanvas(props: Props) {
               shadeKey(node),
             );
 
+      const focus = focused.current;
       if (node === selected) {
         // The fill still says which language: a selection that repainted the
         // node would hide the one thing colour is for.
@@ -634,24 +887,18 @@ export function GraphCanvas(props: Props) {
         if (focus.uses.has(node) || focus.usedBy.has(node)) {
           return { ...data, color: fill, zIndex: 2, forceLabel: focus.nameThem };
         }
-        // Dimmed and shrunk rather than hidden: the shape of the whole is
-        // the context that makes a neighbourhood mean anything, but it has
-        // to stop competing while you read one. `dim` sits close to the
-        // background on purpose — the mid grey it used to use turned the rest
-        // of a 900-node graph into one solid slab.
-        //
-        // Blended by `fade` rather than applied outright, which is what makes
-        // this an effect instead of a flash.
-        const away = fade.current;
+        // Faded, not shrunk and not hidden. Shrinking was ours, not
+        // Obsidian's, and it is the wrong channel twice over: size means
+        // degree here, so animating it says something false about the graph,
+        // and a node that both dims and shrinks reads as leaving rather than
+        // as receding.
+        const strength = 1 - (1 - DIMMED) * fade.current;
         return {
           ...data,
-          color: towards(canvas.dim, fill, away),
-          size: data.size * (1 - 0.45 * away),
-          // The name fades with its node rather than vanishing at a
-          // threshold. Pushed further than the node itself: text at half
-          // strength still reads as text, where a dot at half strength has
-          // already stopped competing.
-          labelInk: towards(canvas.background, canvas.label, 1 - 0.85 * away),
+          color: towards(fill, strength),
+          // The name recedes with its node. Multiplied into the camera's own
+          // label strength by the drawer, which is Obsidian's `y *= s`.
+          labelFade: strength,
           zIndex: 0,
         };
       }
@@ -665,7 +912,7 @@ export function GraphCanvas(props: Props) {
       // an edge whose end crosses the frame boundary is drawn, dropped, drawn
       // again on alternate frames, and a few hundred of those flickering at
       // once is what read as "the lines are not fixed".
-      if (spikeHot()) return true;
+      if (physics.current?.hot()) return true;
       const box = onScreen.current;
       if (!box) return true;
       const x = graph.getNodeAttribute(node, "x") as number;
@@ -682,19 +929,17 @@ export function GraphCanvas(props: Props) {
       if (edgeMode === "linked" && !inFrame(source) && !inFrame(target)) {
         return { ...data, hidden: true };
       }
+      const focus = focused.current;
       if (focus) {
-        // What the anchor uses: the focus colour, the thing you are
-        // following. What uses the anchor: the plain foreground. The two
-        // directions never have to be guessed from arrowheads alone.
-        // Both directions in the accent, distinguished by weight rather than
-        // by two competing inks. A hub's two hundred rays have to be legible
-        // as a fan, and two colours at that density read as a mess.
+        // Both directions in the accent, told apart by weight rather than by
+        // two competing inks. A hub's two hundred rays have to be legible as a
+        // fan, and two colours at that density read as a mess.
         if (source === focus.anchor && focus.uses.has(target)) {
           return {
             ...data,
             type: "arrow",
             color: canvas.accent,
-            size: 0.9,
+            size: ink.size * 1.7 * edgeScale.current,
             zIndex: 2,
           };
         }
@@ -702,35 +947,34 @@ export function GraphCanvas(props: Props) {
           return {
             ...data,
             color: mix(canvas.accent, canvas.background, 0.72),
-            size: 0.6,
+            size: ink.size * 1.2 * edgeScale.current,
             zIndex: 2,
           };
         }
-        // Everything the anchor does not touch recedes almost to nothing,
-        // blended by `fade` so it is a transition and not a cut. Thinning
-        // alone was not enough: a thin line crossing a thousand others is
-        // still a thousand lines, and the neighbourhood has to be the only
-        // thing left with any weight.
-        const away = fade.current;
+        // Everything the anchor does not touch recedes to a fifth. Width is
+        // left alone: at one pixel there is nowhere for it to go, and it is
+        // the ink that was competing.
         return {
           ...data,
-          color: towards(canvas.edgeMuted, ink.color, away),
-          size: ink.size * (1 - 0.45 * away),
+          color: towards(ink.color, 1 - (1 - DIMMED) * fade.current),
+          size: ink.size * edgeScale.current,
         };
       }
-      return { ...data, color: ink.color, size: ink.size };
+      return { ...data, color: ink.color, size: ink.size * edgeScale.current };
     });
 
-    renderer.setSetting("defaultDrawNodeLabel", labelDrawer(canvas));
-    renderer.setSetting("defaultDrawNodeHover", hoverDrawer(canvas));
+    renderer.setSetting("defaultDrawNodeLabel", labelDrawer(canvas, zoomAlpha));
+    renderer.setSetting("defaultDrawNodeHover", hoverDrawer(canvas, zoomAlpha));
     renderer.setSetting("defaultEdgeColor", ink.color);
     renderer.refresh();
-  }, [graph, index, visible, selected, focus, colourBy, edgeMode, theme]);
+  }, [graph, index, visible, selected, colourBy, edgeMode, theme]);
 
   useEffect(() => {
     const renderer = sigma.current;
     if (!renderer) return;
     const mode = LABEL_MODES[labelMode];
+    labelZoom.current = mode.zoom;
+    zoomAlpha.current = readZoom(renderer.getCamera().ratio);
     renderer.setSetting("renderLabels", labelMode !== "none");
     renderer.setSetting("labelRenderedSizeThreshold", mode.threshold);
     renderer.setSetting("labelDensity", mode.density);
@@ -739,7 +983,7 @@ export function GraphCanvas(props: Props) {
     // rebuilding it — so the setting landed but nothing changed on screen
     // until some other interaction forced a real refresh.
     renderer.refresh();
-  }, [labelMode]);
+  }, [labelMode, readZoom]);
 
   // Clicking a node no longer moves the camera.
   //

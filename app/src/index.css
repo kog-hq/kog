@@ -28,50 +28,85 @@
   --color-focus-soft: color-mix(in srgb, #4a90d9 16%, transparent);
 }
 
-/* --- Dark, the default: a graph is a light-on-dark instrument ------------ */
+/* --- Dark, the default: a graph is a light-on-dark instrument ------------
+   Obsidian's own greys, read out of `app.css` rather than estimated from a
+   screenshot, because two earlier guesses got both the hue and the direction
+   wrong:
+
+     --color-base-00: #1C1C1C   → --background-primary   (the canvas)
+     --color-base-20: #282828   → --background-secondary (the sidebar)
+     --color-base-30: #333333   → --background-modifier-border
+
+   They are **neutral**. A slate with blue in it looked like a design choice
+   and read as one — the graph sat in a cold room. And the canvas is the
+   *darkest* surface, not the lightest: the rail steps toward mid grey and the
+   canvas holds the extreme. That is the same rule in both themes, which is
+   why the light theme below already had it right — there the extreme is the
+   pale end. The stage is the furthest thing from the reader either way.
+
+   Not pure black, though. A true `#000` gives every coloured dot nothing to
+   compete with, so each one reads as a light source instead of an object. */
 :root {
   --radius: 0.5rem;
 
-  --background: #0d0d0f;
-  --foreground: #e8e8ea;
-  --card: #141519;
-  --card-foreground: #e8e8ea;
-  --popover: #16171b;
-  --popover-foreground: #e8e8ea;
-  --primary: #e8e8ea;
-  --primary-foreground: #0d0d0f;
-  --secondary: #1c1d22;
-  --secondary-foreground: #e8e8ea;
-  --muted: #1c1d22;
-  --muted-foreground: #8b8d96;
-  --accent: #22232a;
-  --accent-foreground: #e8e8ea;
+  --background: #1c1c1c;
+  --rail: #282828;
+  --foreground: #dadada;
+  --card: #2e2e2e;
+  --card-foreground: #dadada;
+  --popover: #2e2e2e;
+  --popover-foreground: #dadada;
+  --primary: #dadada;
+  --primary-foreground: #1c1c1c;
+  --secondary: #2e2e2e;
+  --secondary-foreground: #dadada;
+  --muted: #2e2e2e;
+  --muted-foreground: #999999;
+  --accent: #333333;
+  --accent-foreground: #dadada;
   --destructive: #e0457b;
-  --border: #26272e;
-  --input: #2c2d35;
+  --border: #333333;
+  --input: #3f3f3f;
   --ring: #4a90d9;
 
   color-scheme: dark;
 }
 
+/* Warm paper rather than white — and built the same way the dark theme was,
+   from Obsidian's own scale rather than by eye. Every value below is one of
+   their light `--color-base-*` steps with its lightness kept and a warm hue
+   laid over it:
+
+     base-00 #ffffff → #fbf9f5   canvas      base-25 #efefef → #f1ebe0
+     base-20 #f6f6f6 → #f5f1e9   rail        base-30 #e4e4e4 → #e8e1d3
+     base-35 #dadada → #e1d8c8   graph line  base-100 #222222 → #222222
+
+   Keeping their steps matters more than the hue does. Picking the two
+   surfaces by eye had put the rail twice as far from the canvas as theirs —
+   a separation you noticed as a stripe rather than as depth.
+
+   The warmth tapers to nothing as the value darkens, which is why the ink is
+   still their exact `#222222`. Cream is a property of paper; applied at full
+   strength all the way down the ramp it turns text into tan. */
 :root[data-theme="light"] {
-  --background: #fbfbfd;
-  --foreground: #15151a;
-  --card: #ffffff;
-  --card-foreground: #15151a;
-  --popover: #ffffff;
-  --popover-foreground: #15151a;
-  --primary: #15151a;
-  --primary-foreground: #fbfbfd;
-  --secondary: #f1f1f5;
-  --secondary-foreground: #15151a;
-  --muted: #f1f1f5;
-  --muted-foreground: #6f7079;
-  --accent: #eaeaf0;
-  --accent-foreground: #15151a;
+  --background: #fbf9f5;
+  --rail: #f5f1e9;
+  --foreground: #222222;
+  --card: #fdfcfa;
+  --card-foreground: #222222;
+  --popover: #fdfcfa;
+  --popover-foreground: #222222;
+  --primary: #222222;
+  --primary-foreground: #fbf9f5;
+  --secondary: #f1ebe0;
+  --secondary-foreground: #222222;
+  --muted: #f1ebe0;
+  --muted-foreground: #736f68;
+  --accent: #e8e1d3;
+  --accent-foreground: #222222;
   --destructive: #c9295f;
-  --border: #e4e4ea;
-  --input: #d8d8e0;
+  --border: #e8e1d3;
+  --input: #c7bda9;
   --ring: #4a90d9;
 
   color-scheme: light;
@@ -85,6 +120,7 @@
 
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-rail: var(--rail);
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);
   --color-popover: var(--popover);
